@@ -1,0 +1,14 @@
+{
+  "candidate_id": "3a343ab8-b327-4a1d-a812-c32272807e46",
+  "job_id": "351d3527-52ab-42c8-a369-34fcee2847b9",
+  "subject": "Interview Invitation – Senior Backend Engineer",
+  "email_body": "Hi Alex,\n\nWe'd love to chat. Pick a time: {{SCHEDULING_LINK}}\n\nThanks!",
+  "interview_type": "HR Interview",
+  "duration_minutes": 30,
+  "buffer_minutes": 10,
+  "timezone": "Africa/Cairo",
+  "availability": [
+    {"day_of_week": 0, "start_time": "10:00", "end_time": "13:00", "timezone": "Africa/Cairo"},
+    {"day_of_week": 2, "start_time": "13:00", "end_time": "17:00", "timezone": "Africa/Cairo"}
+  ]
+}
