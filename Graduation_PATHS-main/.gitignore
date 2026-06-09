@@ -49,3 +49,18 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+_run_logs/
+
+# Runtime artifacts & generated output
+backend/uploads/
+backend/interview_reports/
+backend/transcripts/
+
+# Local scratch / manual-API-test dumps at the backend root (kept out of git).
+# These are top-level only — real JSON/PDF assets under app/, seed/, docs/ are
+# unaffected.
+/backend/*.json
+/backend/*.pdf
+
+# Accidental nested project copies
+**/Graduation_PATHS-main/

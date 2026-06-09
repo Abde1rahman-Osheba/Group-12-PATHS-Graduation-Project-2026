@@ -11,6 +11,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
 
+  // Next.js 16 builds with Turbopack by default. When @sentry/nextjs is
+  // installed (as it is in a full `pnpm install`, e.g. the Docker image) its
+  // wrapper injects a `webpack` config, and Turbopack then refuses to build
+  // unless a `turbopack` config is also present. An empty object is the
+  // officially-recommended acknowledgement — see the Next 16 build error:
+  // "setting an empty turbopack config in your Next config file (turbopack: {})".
+  turbopack: {},
+
   // Expose the git SHA to the browser bundle so Sentry can link errors to
   // the correct release.  Set NEXT_PUBLIC_APP_VERSION=<sha> in CI.
   env: {
