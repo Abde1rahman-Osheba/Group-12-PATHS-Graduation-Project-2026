@@ -246,6 +246,8 @@ cd frontend && pnpm --filter @paths/web exec tsc --noEmit
 | Document | Description |
 |---|---|
 | [Architecture blueprint](docs/PATHS_Deep_Architecture_Blueprint.md) | Deep architecture and design rationale. |
+| [Recommendation system](docs/RECOMMENDATION_SYSTEM.md) | Content-based matching, scoring & ranking. |
+| [PATHy assistant](docs/PATHy.md) | The in-app context-aware support chatbot. |
 | [Project walkthrough](docs/PATHS_PROJECT_WALKTHROUGH.md) | End-to-end product tour. |
 | [Database design](docs/DDBB.md) | Schema, graph model, and entities. |
 | [Find-talent workflow](docs/FIND_TALENT_WORKFLOW.md) | Sourcing pipeline. |
