@@ -22,4 +22,3 @@
 | Faculty                                     | University             |
 | ------------------------------------------- | ---------------------- |
 | Faculty of Computer Science and Engineering | Galala University (GU) |
-| :::                                         |                        |
