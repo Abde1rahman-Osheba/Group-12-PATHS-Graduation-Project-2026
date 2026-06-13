@@ -6,6 +6,7 @@ import { Shell } from "@/components/layout/shell";
 import { useAuthStore } from "@/lib/stores/auth.store";
 import { AgentRunsListener } from "@/components/features/agents/AgentRunsListener";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
+import { AssistantWidget } from "@/components/assistant/AssistantWidget";
 
 /**
  * Dashboard route group — gating rules:
@@ -73,6 +74,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <ImpersonationBanner />
       {orgId && <AgentRunsListener orgId={orgId} />}
       {children}
+      <AssistantWidget />
     </Shell>
   );
 }

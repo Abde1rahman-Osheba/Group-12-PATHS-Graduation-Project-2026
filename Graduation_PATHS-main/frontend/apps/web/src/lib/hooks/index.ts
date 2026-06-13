@@ -64,6 +64,7 @@ import {
   type BackendQdrantCollection,
   getApiHealth,
   type BackendJob,
+  type BackendJobWriteBody,
 } from "@/lib/api";
 
 import type {
@@ -2240,7 +2241,7 @@ export const useAddCandidateToJob = (jobId: string) => {
 export const useUpdateJob = (jobId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<BackendJob>) => jobsApi.update(jobId, body),
+    mutationFn: (body: BackendJobWriteBody) => jobsApi.update(jobId, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["job", jobId] });
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -2311,7 +2312,7 @@ export const useCandidateDetail = (candidateId: string | null | undefined, jobId
 export const useCreateJob = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<BackendJob>) => jobsApi.create(body),
+    mutationFn: (body: BackendJobWriteBody) => jobsApi.create(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
     },

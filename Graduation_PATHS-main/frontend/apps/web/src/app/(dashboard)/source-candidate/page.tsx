@@ -5,9 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Database,
-  Globe,
   Loader2,
-  Plus,
   Sparkles,
   UserRound,
   CheckCircle2,
@@ -19,18 +17,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useJobs, useShortlistSourcedCandidate } from "@/lib/hooks";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
 
-// fix6.md — recruiter Source Candidate workspace.
+// Recruiter Source Candidate workspace.
 //
 // Layout:
-//   * Top: job picker (used by Shortlist + Explain context)
-//   * Tab 1 "Candidates From Our Database" — Explain + Shortlist per row.
-//   * Tab 2 "LinkedIn Open-To-Work Candidates" — Add to Process → preview,
-//     then Import. After import, Explain + Shortlist appear on the same row.
+//   * Top: job picker (used by Shortlist + Explain context) + search.
+//   * "Candidates From Our Database" — Explain + Shortlist per row.
+//     (The LinkedIn Open-To-Work fetch tab was removed; previously imported
+//     candidates keep their provenance label on the card.)
 
 interface DatabaseCandidate {
   candidate_id: string;
@@ -53,39 +50,6 @@ interface DatabaseCandidateList {
   items: DatabaseCandidate[];
 }
 
-interface ExternalCandidate {
-  id: string;
-  full_name: string | null;
-  headline: string | null;
-  current_title: string | null;
-  current_company: string | null;
-  location: string | null;
-  profile_url: string | null;
-  email: string | null;
-  skills: string[];
-  open_to_work_signal: boolean | null;
-  open_to_work_evidence: string | null;
-  technical_role_evidence: string | null;
-  import_status: "ready_to_import" | "imported" | "duplicate";
-  imported_candidate_id: string | null;
-  provider: string;
-  created_at: string;
-}
-
-interface FetchResponse {
-  batch_id: string;
-  provider: string;
-  candidates: ExternalCandidate[];
-}
-
-interface ImportResponse {
-  status: "imported" | "duplicate" | "already_imported";
-  candidate_id: string;
-  created_account: boolean;
-  duplicate_detected: boolean;
-  message: string;
-}
-
 interface ExplainResponse {
   candidate_id: string;
   summary: string;
@@ -102,8 +66,6 @@ interface ExplainResponse {
   used_fallback: boolean;
 }
 
-type SourceTag = "database" | "linkedin_open_to_work";
-
 const API_BASE = "/api/v1/recruiter/source-candidate";
 
 export default function SourceCandidatePage() {
@@ -112,12 +74,8 @@ export default function SourceCandidatePage() {
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const resolvedJobId = selectedJobId || (jobs[0] ? String(jobs[0].id) : "");
 
-  const [tab, setTab] = useState<SourceTag>("database");
   const [q, setQ] = useState("");
-  const [fetched, setFetched] = useState<ExternalCandidate[]>([]);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [importingId, setImportingId] = useState<string | null>(null);
   const [shortlistingId, setShortlistingId] = useState<string | null>(null);
   const [shortlistedIds, setShortlistedIds] = useState<Set<string>>(new Set());
   const [explainById, setExplainById] = useState<
@@ -158,72 +116,6 @@ export default function SourceCandidatePage() {
       ),
     staleTime: 30_000,
   });
-
-  // ── Section 2: external open-to-work fetch (Add to Process) ────────────
-  const fetchMutation = useMutation({
-    mutationFn: async () =>
-      api.post<FetchResponse>(`${API_BASE}/external/fetch`, {
-        source: "linkedin_mcp",
-        count: 5,
-        role_category: "technical",
-      }),
-    onSuccess: (res) => {
-      setFetched(res.candidates);
-      setFetchError(null);
-      if (res.candidates.length === 0) {
-        setFetchError(
-          "No technical open-to-work candidates returned. Configure the LinkedIn MCP provider or drop a consented export in the configured directory.",
-        );
-      }
-    },
-    onError: (err: unknown) => {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Unable to fetch candidates from the selected provider. Please check provider configuration or import from an approved CSV export.";
-      setFetchError(msg);
-      setFetched([]);
-    },
-  });
-
-  const importMutation = useMutation({
-    mutationFn: async (externalId: string) =>
-      api.post<ImportResponse>(`${API_BASE}/external/${externalId}/import`, {}),
-  });
-
-  async function onImport(row: ExternalCandidate) {
-    setActionError(null);
-    setImportingId(row.id);
-    try {
-      const res = await importMutation.mutateAsync(row.id);
-      setFetched((prev) =>
-        prev.map((c) =>
-          c.id === row.id
-            ? {
-                ...c,
-                import_status: res.duplicate_detected ? "duplicate" : "imported",
-                imported_candidate_id: res.candidate_id,
-              }
-            : c,
-        ),
-      );
-      qc.invalidateQueries({
-        queryKey: ["source-candidate", "database"],
-      });
-      setToast({
-        kind: res.duplicate_detected ? "duplicate" : "success",
-        text: res.duplicate_detected
-          ? "Candidate already exists in your database. Linked external source to the existing profile."
-          : "Candidate imported successfully and added to your database.",
-      });
-    } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to import candidate.",
-      );
-    } finally {
-      setImportingId(null);
-    }
-  }
 
   // ── Explain ────────────────────────────────────────────────────────────
   const explainMutation = useMutation({
@@ -301,8 +193,7 @@ export default function SourceCandidatePage() {
             Source Candidate
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage candidates from your database and import real open-to-work
-            technical candidates from external recruitment sources.
+            Manage, score and shortlist the candidates in your database.
           </p>
         </div>
 
@@ -342,111 +233,32 @@ export default function SourceCandidatePage() {
         </p>
       )}
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as SourceTag)}>
-        <TabsList>
-          <TabsTrigger value="database" className="gap-1.5">
-            <Database className="h-3.5 w-3.5" /> Candidates From Our Database
-          </TabsTrigger>
-          <TabsTrigger value="linkedin_open_to_work" className="gap-1.5">
-            <Globe className="h-3.5 w-3.5" /> LinkedIn Open-To-Work Candidates
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── Section 1 ───────────────────────────────────────────────── */}
-        <TabsContent value="database" className="mt-4 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Total Candidates: {dbQuery.data?.total ?? 0}
-          </p>
-          {dbQuery.isLoading ? (
-            <LoadingRow label="Loading candidates…" />
-          ) : dbQuery.isError ? (
-            <ErrorRow label="Failed to load candidates." />
-          ) : (dbQuery.data?.items.length ?? 0) === 0 ? (
-            <EmptyRow label="No candidates yet. Use LinkedIn Open-To-Work Candidates to import technical candidates from external sources." />
-          ) : (
-            dbQuery.data!.items.map((c) => (
-              <DatabaseCard
-                key={c.candidate_id}
-                candidate={c}
-                shortlisted={shortlistedIds.has(c.candidate_id)}
-                shortlisting={shortlistingId === c.candidate_id}
-                canShortlist={Boolean(resolvedJobId)}
-                explanation={explainById[c.candidate_id]}
-                onExplain={() => onExplain(c.candidate_id)}
-                onShortlist={() => onShortlist(c.candidate_id)}
-              />
-            ))
-          )}
-        </TabsContent>
-
-        {/* ── Section 2 ───────────────────────────────────────────────── */}
-        <TabsContent value="linkedin_open_to_work" className="mt-4 space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Fetch 5 technical candidates who are open to work from LinkedIn or
-            another approved recruitment data provider, then import selected
-            profiles into your candidate database.
-          </p>
-
-          <div className="glass rounded-xl p-4 flex flex-wrap items-center gap-3">
-            <Button
-              onClick={() => fetchMutation.mutate()}
-              disabled={fetchMutation.isPending}
-            >
-              {fetchMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              Add to Process
-            </Button>
-            {fetchMutation.isPending && (
-              <span className="text-xs text-muted-foreground">
-                Fetching 5 technical open-to-work candidates…
-              </span>
-            )}
-          </div>
-
-          {fetchError && (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-              {fetchError}
-            </p>
-          )}
-
-          {fetched.length === 0 ? (
-            !fetchMutation.isPending && !fetchError && (
-              <EmptyRow label="No external candidates fetched yet. Click Add to Process to fetch 5 technical open-to-work candidates." />
-            )
-          ) : (
-            <div className="space-y-3">
-              {fetched.map((c) => {
-                const realId = c.imported_candidate_id;
-                return (
-                  <ExternalCard
-                    key={c.id}
-                    candidate={c}
-                    importing={importingId === c.id}
-                    canShortlist={Boolean(resolvedJobId)}
-                    shortlisted={
-                      realId ? shortlistedIds.has(realId) : false
-                    }
-                    shortlisting={
-                      realId ? shortlistingId === realId : false
-                    }
-                    explanation={realId ? explainById[realId] : undefined}
-                    onImport={() => onImport(c)}
-                    onExplain={
-                      realId ? () => onExplain(realId) : undefined
-                    }
-                    onShortlist={
-                      realId ? () => onShortlist(realId) : undefined
-                    }
-                  />
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+      {/* ── Candidates From Our Database ─────────────────────────────── */}
+      <div className="mt-2 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Total Candidates: {dbQuery.data?.total ?? 0}
+        </p>
+        {dbQuery.isLoading ? (
+          <LoadingRow label="Loading candidates…" />
+        ) : dbQuery.isError ? (
+          <ErrorRow label="Failed to load candidates." />
+        ) : (dbQuery.data?.items.length ?? 0) === 0 ? (
+          <EmptyRow label="No candidates in your database yet." />
+        ) : (
+          dbQuery.data!.items.map((c) => (
+            <DatabaseCard
+              key={c.candidate_id}
+              candidate={c}
+              shortlisted={shortlistedIds.has(c.candidate_id)}
+              shortlisting={shortlistingId === c.candidate_id}
+              canShortlist={Boolean(resolvedJobId)}
+              explanation={explainById[c.candidate_id]}
+              onExplain={() => onExplain(c.candidate_id)}
+              onShortlist={() => onShortlist(c.candidate_id)}
+            />
+          ))
+        )}
+      </div>
 
       {toast && (
         <motion.div
@@ -535,159 +347,6 @@ function DatabaseCard(props: {
         onExplain={props.onExplain}
         onShortlist={props.onShortlist}
       />
-      <ExplanationBlock state={props.explanation} />
-    </motion.div>
-  );
-}
-
-function ExternalCard(props: {
-  candidate: ExternalCandidate;
-  importing: boolean;
-  shortlisted: boolean;
-  shortlisting: boolean;
-  canShortlist: boolean;
-  explanation: ExplainResponse | "loading" | undefined;
-  onImport: () => void;
-  onExplain?: () => void;
-  onShortlist?: () => void;
-}) {
-  const c = props.candidate;
-  const isImported = c.import_status === "imported";
-  const isDuplicate = c.import_status === "duplicate";
-  const importedReal = isImported || isDuplicate;
-  return (
-    <motion.div layout className="glass rounded-xl p-4 space-y-2">
-      <div className="flex items-baseline justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-semibold text-sm text-foreground">
-            {c.full_name || "—"}
-          </p>
-          <Badge
-            variant="outline"
-            className="border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
-          >
-            {c.provider === "csv_export"
-              ? "Consented CSV Export"
-              : "LinkedIn Open-To-Work"}
-          </Badge>
-          {c.open_to_work_signal === true ? (
-            <Badge
-              variant="outline"
-              className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px]"
-            >
-              Open to work
-            </Badge>
-          ) : (
-            <Badge
-              variant="outline"
-              className="text-muted-foreground text-[10px]"
-            >
-              Open-to-work status: Unknown
-            </Badge>
-          )}
-          {isImported && (
-            <Badge
-              variant="outline"
-              className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px]"
-            >
-              Imported
-            </Badge>
-          )}
-          {isDuplicate && (
-            <Badge
-              variant="outline"
-              className="border-amber-500/40 bg-amber-500/10 text-amber-200 text-[10px]"
-            >
-              Already Exists
-            </Badge>
-          )}
-          {importedReal && <StatusBadge shortlisted={props.shortlisted} />}
-        </div>
-        {c.profile_url && (
-          <a
-            href={c.profile_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-          >
-            View source
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        )}
-      </div>
-      <p className="text-[12px] text-muted-foreground">
-        {c.current_title || c.headline || "—"}
-        {c.current_company ? ` · ${c.current_company}` : ""}
-        {c.location ? ` · ${c.location}` : ""}
-      </p>
-      {c.open_to_work_evidence && (
-        <p className="text-[11px] text-muted-foreground/80">
-          Open-to-work evidence: {c.open_to_work_evidence}
-        </p>
-      )}
-      {c.technical_role_evidence && (
-        <p className="text-[11px] text-muted-foreground/80">
-          Technical role evidence: {c.technical_role_evidence}
-        </p>
-      )}
-      <SkillsRow skills={c.skills} />
-
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        {importedReal ? (
-          <>
-            {c.imported_candidate_id ? (
-              <Button size="sm" variant="ghost" asChild>
-                <Link
-                  href={`/candidates/${encodeURIComponent(c.imported_candidate_id)}`}
-                >
-                  <UserRound className="h-3.5 w-3.5" /> View Profile
-                </Link>
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={props.onExplain}
-              disabled={!props.onExplain}
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Explain
-            </Button>
-            <Button
-              size="sm"
-              disabled={
-                !props.onShortlist ||
-                !props.canShortlist ||
-                props.shortlisted ||
-                props.shortlisting
-              }
-              onClick={props.onShortlist}
-              title={!props.canShortlist ? "Pick a job above first" : undefined}
-            >
-              {props.shortlisting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : props.shortlisted ? (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5" />
-              )}
-              {props.shortlisted ? "Shortlisted" : "Shortlist"}
-            </Button>
-          </>
-        ) : (
-          <Button
-            size="sm"
-            onClick={props.onImport}
-            disabled={props.importing}
-          >
-            {props.importing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            Import
-          </Button>
-        )}
-      </div>
       <ExplanationBlock state={props.explanation} />
     </motion.div>
   );

@@ -5,8 +5,7 @@ import Link from "next/link";
 import { motion, useInView } from "framer-motion";
 import {
   Brain, Shield, Users, ChevronRight, ArrowRight,
-  CheckCircle2, Star, Upload, Link2, BarChart3, Search,
-  Clock, Award, Zap,
+  CheckCircle2, Star, Upload, Link2, BarChart3, Search, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
@@ -16,11 +15,21 @@ import MarketingFooter from "@/components/marketing/MarketingFooter";
 
 /* ─── Data ─────────────────────────────────────────────────────────────────── */
 
-const stats = [
-  { value: "15",   label: "AI Agents",       icon: Brain  },
-  { value: "87%",  label: "Bias Reduction",  icon: Shield },
-  { value: "10×",  label: "Faster Screening",icon: Clock  },
-  { value: "100%", label: "Audit Trail",      icon: Award  },
+// Two clear capability cards instead of vanity numbers — they say what PATHS
+// actually does, which is the real hook.
+const highlights = [
+  {
+    icon: Shield,
+    accent: "teal",
+    title: "Fair by design",
+    desc: "Anonymized, bias-guarded screening — and no candidate is ever rejected by an algorithm alone.",
+  },
+  {
+    icon: BarChart3,
+    accent: "blue",
+    title: "Explainable by default",
+    desc: "Every score is backed by traceable evidence, with a human approving each decision and a full audit trail.",
+  },
 ];
 
 const steps = [
@@ -33,7 +42,7 @@ const steps = [
   {
     step: "02", icon: Brain,
     title: "AI matches you to jobs",
-    desc:  "15 specialized AI agents analyze your profile against live job requirements — transparently, with evidence for every score.",
+    desc:  "Specialized AI agents analyze your profile against live job requirements — transparently, with evidence for every score.",
     accent: "violet",
   },
   {
@@ -67,25 +76,30 @@ const candidateFeatures = [
 ];
 
 const companyFeatures = [
-  "15 specialized AI agents for CV parsing, scoring, and ranking",
-  "Anonymized screening eliminates name, gender, and age bias",
-  "Full audit trail for every hiring decision",
-  "Human-in-the-loop approvals before shortlists are released",
-  "Evidence-based scoring — every claim traceable to source",
-  "Integrates with your existing ATS and HR tools",
+  "Specialized AI agents for sourcing, CV screening, scoring & ranking",
+  "Anonymized screening removes name, gender & age bias",
+  "Evidence-based scoring — every claim traceable to its source",
+  "Human-in-the-loop approval before any shortlist or decision",
+  "Interview intelligence — AI question packs, transcript analysis & scoring",
+  "Decision-support rubric with per-stage breakdown & growth plans",
+  "Full, exportable audit trail for every hiring decision",
 ];
 
 const testimonials = [
   {
-    quote:  "PATHS cut our time-to-shortlist from 3 weeks to 2 days. The evidence-based scoring gives our hiring managers confidence they've never had before.",
-    author: "Head of Talent",
-    company:"TechScale MENA",
+    quote:
+      "I'm genuinely proud to recommend PATHS. It brings real evidence and fairness to screening — exactly what modern talent acquisition needs — and my team trusts its shortlists from day one.",
+    author: "Marwah Muhammad",
+    role: "Talent Acquisition Partner",
+    company: "Nokia",
     rating: 5,
   },
   {
-    quote:  "I submitted my profile once and got matched to 4 relevant roles. I loved that I could see exactly why I scored well on each one.",
-    author: "Senior Backend Engineer",
-    company:"Hired via PATHS",
+    quote:
+      "One of the best hiring systems I've ever tried. It gets fairness and explainability right in a way I rarely see — even in commercial tools.",
+    author: "Prof. Shaker",
+    role: "Professor & Academic Supervisor",
+    company: "",
     rating: 5,
   },
 ];
@@ -231,25 +245,49 @@ export default function HomePage() {
             </motion.div>
           </motion.div>
 
-          {/* ── Stat cards ───────────────────────────────────── */}
+          {/* ── Trust line ───────────────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.34, ease }}
+            className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[13px] text-slate-500"
+          >
+            {["No black boxes", "No algorithmic rejections", "Every score explained"].map(
+              (item) => (
+                <span key={item} className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  {item}
+                </span>
+              ),
+            )}
+          </motion.div>
+
+          {/* ── Capability cards (two, no vanity numbers) ─────── */}
           <motion.div
             initial={{ opacity: 0, y: 32 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.38, ease }}
-            className="mt-16 grid grid-cols-2 gap-4 sm:grid-cols-4"
+            className="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2"
           >
-            {stats.map(({ value, label, icon: Icon }, i) => (
+            {highlights.map(({ icon: Icon, title, desc, accent }) => (
               <motion.div
-                key={label}
+                key={title}
                 whileHover={{ y: -3 }}
                 transition={{ type: "spring", stiffness: 380, damping: 28 }}
-                className="mkt-card flex flex-col items-center py-6 px-4 text-center"
+                className="mkt-card flex items-start gap-4 p-6 text-left"
               >
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 border border-blue-100">
-                  <Icon className="h-5 w-5 text-blue-600" />
+                <div
+                  className={cn(
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border",
+                    accentClasses[accent],
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
                 </div>
-                <p className="font-heading text-3xl font-bold tracking-tight text-[#0D1527]">{value}</p>
-                <p className="mt-1 text-[12px] text-slate-500">{label}</p>
+                <div>
+                  <p className="font-heading text-[16px] font-semibold text-[#0D1527]">{title}</p>
+                  <p className="mt-1.5 text-[13.5px] leading-relaxed text-slate-500">{desc}</p>
+                </div>
               </motion.div>
             ))}
           </motion.div>
@@ -449,7 +487,9 @@ export default function HomePage() {
                     </div>
                     <div>
                       <p className="text-[13px] font-semibold text-[#0D1527]">{t.author}</p>
-                      <p className="text-[12px] text-slate-500">{t.company}</p>
+                      <p className="text-[12px] text-slate-500">
+                        {[t.role, t.company].filter(Boolean).join(" · ")}
+                      </p>
                     </div>
                   </div>
                 </div>

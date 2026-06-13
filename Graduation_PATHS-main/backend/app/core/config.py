@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     openrouter_dss_model: str = "meta-llama/llama-3.3-70b-instruct:free"
     openrouter_development_model: str = "meta-llama/llama-3.3-70b-instruct:free"
     openrouter_outreach_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    # PATHy in-app assistant — a SMALL/FAST model so the chat feels snappy
+    # (the 70B free model is too slow for an interactive widget). Falls through
+    # the free-model chain if rate-limited.
+    assistant_model: str = "openai/gpt-oss-20b:free"
     # Free-model fallback chain — when the primary model is rate-limited (429)
     # the OpenRouter client falls through these, all :free tier, mixed providers.
     openrouter_free_fallback_models: str = (

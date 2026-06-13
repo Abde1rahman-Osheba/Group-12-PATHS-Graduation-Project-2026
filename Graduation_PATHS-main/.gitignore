@@ -62,5 +62,17 @@ backend/transcripts/
 /backend/*.json
 /backend/*.pdf
 
+# Saved API request/response dumps used during local dev (never commit — a
+# login.json can leak a real JWT). Matched anywhere in the tree.
+**/login.json
+**/book_payload.json
+**/draft.json
+**/draft_payload.json
+**/history.json
+**/send.json
+
 # Accidental nested project copies
 **/Graduation_PATHS-main/
+
+# gitleaks local binary (downloaded for ad-hoc scans)
+.tmp_gl/

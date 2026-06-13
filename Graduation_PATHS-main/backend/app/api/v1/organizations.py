@@ -196,6 +196,50 @@ def list_my_org_members(
     return [_member_out(m) for m in rows]
 
 
+class InviteEmailPreviewOut(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+
+@router.post(
+    "/{organization_id}/members/invite-preview",
+    response_model=InviteEmailPreviewOut,
+    dependencies=[Depends(require_org_role("org_admin"))],
+)
+def preview_member_invite_email(
+    organization_id: UUID,
+    data: CreateMemberRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Compose the EXACT invitation email (recipient, subject, body) without
+    creating the member or sending anything — the admin reviews and approves
+    it first; the approved invite then goes through POST /members."""
+    from app.core.config import get_settings
+    from app.services.email_service import compose_organization_invite_email
+
+    org = db.get(Organization, organization_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    settings = get_settings()
+    return InviteEmailPreviewOut(
+        **compose_organization_invite_email(
+            to=data.email,
+            invited_member_name=data.full_name or data.email,
+            inviter_name=(current_user.full_name or current_user.email),
+            inviter_email=current_user.email,
+            organization_name=org.name,
+            temporary_password=data.password,
+            login_url=(
+                settings.outreach_public_base_url + "/login"
+                if settings.outreach_public_base_url
+                else None
+            ),
+        )
+    )
+
+
 @router.post(
     "/{organization_id}/members",
     response_model=CreateMemberResponse,

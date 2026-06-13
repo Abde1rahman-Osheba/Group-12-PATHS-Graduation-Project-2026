@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -53,11 +53,13 @@ from app.schemas.interview import (
 from app.services.interview.interview_audit import log_interview_action
 from app.services.interview.availability import list_availability
 from app.services.interview.interview_service import (
+    NO_SHOW_RECOMMENDATION,
     assert_application_in_org,
     candidate_owns_application,
     generate_question_packs,
     get_interview_for_org,
     mark_completed_if_analyzed,
+    mark_no_show_if_expired,
     require_org_hr,
     run_full_analysis,
     schedule_interview,
@@ -89,6 +91,10 @@ def list_interviews(
     for inv in rows:
         cand = db.get(Candidate, inv.candidate_id)
         job = db.get(Job, inv.job_id)
+        # Scheduled time passed and nobody ever joined → no_show + zero score
+        # (cleared again if the interview is rescheduled).
+        if mark_no_show_if_expired(db, inv):
+            healed = True
         # Latest decision packet → inline performance snapshot for the list row.
         packet = db.execute(
             select(InterviewDecisionPacket)
@@ -330,6 +336,15 @@ async def patch_reschedule(
     inv.scheduled_end_time = body.new_end
     inv.timezone = body.timezone
     inv.status = "rescheduled"
+    # Rescheduling forgives a no-show: drop the auto zero-score packet(s) so
+    # the candidate is scored on the new meeting instead.
+    db.execute(
+        delete(InterviewDecisionPacket).where(
+            InterviewDecisionPacket.interview_id == inv.id,
+            InterviewDecisionPacket.recommendation == NO_SHOW_RECOMMENDATION,
+        ),
+        execution_options={"synchronize_session": False},
+    )
     log_interview_action(
         db, actor_user_id=current_user.id, action="interview.reschedule",
         entity_id=inv.id, new_value={"start": body.new_start.isoformat()},

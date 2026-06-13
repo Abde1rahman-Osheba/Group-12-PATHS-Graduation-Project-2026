@@ -239,9 +239,14 @@ function InterviewInviteCard({ iv }: { iv: BackendCandidateInterview }) {
   const when = iv.scheduled_start_time ? new Date(iv.scheduled_start_time) : null;
   const typeLabel = INTERVIEW_TYPE_LABELS[iv.interview_type] ?? "Interview";
   const title = [iv.job_title, typeLabel].filter(Boolean).join(" — ") || typeLabel;
+  const noShow = iv.status === "no_show";
 
   return (
-    <div className="rounded-xl border border-border/40 bg-muted/10 p-4">
+    <div
+      className={`rounded-xl border p-4 ${
+        noShow ? "border-red-500/30 bg-red-500/5" : "border-border/40 bg-muted/10"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -249,6 +254,11 @@ function InterviewInviteCard({ iv }: { iv: BackendCandidateInterview }) {
             {iv.status === "rescheduled" && (
               <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-400">
                 Rescheduled
+              </Badge>
+            )}
+            {noShow && (
+              <Badge variant="outline" className="border-red-500/30 bg-red-500/10 text-[10px] text-red-400">
+                Cancelled — no one joined
               </Badge>
             )}
           </div>
@@ -263,7 +273,11 @@ function InterviewInviteCard({ iv }: { iv: BackendCandidateInterview }) {
             {iv.timezone ? ` · ${iv.timezone}` : ""}
           </p>
         </div>
-        {iv.meeting_url ? (
+        {noShow ? (
+          <Button size="sm" variant="outline" disabled className="gap-1.5 shrink-0">
+            <Video className="h-3.5 w-3.5" /> Meeting expired
+          </Button>
+        ) : iv.meeting_url ? (
           <a href={iv.meeting_url} target="_blank" rel="noreferrer" className="shrink-0">
             <Button size="sm" className="gap-1.5 glow-blue">
               <Video className="h-3.5 w-3.5" /> Join meeting
@@ -275,9 +289,16 @@ function InterviewInviteCard({ iv }: { iv: BackendCandidateInterview }) {
           </Button>
         )}
       </div>
-      <p className="mt-2.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-500/90">
-        <Bell className="h-3 w-3" /> Don&apos;t forget to attend this meeting.
-      </p>
+      {noShow ? (
+        <p className="mt-2.5 flex items-center gap-1.5 text-[11px] font-medium text-red-400/90">
+          <Bell className="h-3 w-3" /> The interview time passed and no one joined — it is scored 0
+          unless the recruiter reschedules it.
+        </p>
+      ) : (
+        <p className="mt-2.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-500/90">
+          <Bell className="h-3 w-3" /> Don&apos;t forget to attend this meeting.
+        </p>
+      )}
     </div>
   );
 }

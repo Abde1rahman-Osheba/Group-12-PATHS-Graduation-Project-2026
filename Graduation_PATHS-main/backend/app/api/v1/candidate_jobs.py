@@ -30,6 +30,7 @@ from app.services.candidate_job_match_service import (
     top_matching_jobs,
 )
 from app.services.candidate_job_seed_service import import_fresh_jobs
+from app.services.interview.interview_service import mark_no_show_if_expired
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/candidates/me", tags=["Candidate Job Matches"])
@@ -107,10 +108,20 @@ def get_my_interviews(
         .join(Job, Interview.job_id == Job.id, isouter=True)
         .where(
             Interview.candidate_id == cand.id,
-            Interview.status.in_(["scheduled", "rescheduled"]),
+            # Include no-shows so the candidate sees "no one joined" invites
+            # (scored 0 unless rescheduled) instead of them silently vanishing.
+            Interview.status.in_(["scheduled", "rescheduled", "no_show"]),
         )
         .order_by(Interview.scheduled_start_time.asc().nullslast())
     ).all()
+    # Heal on read: a scheduled invite whose time passed with nobody joining
+    # becomes a no_show with a zero score (all interview types).
+    healed = False
+    for iv, _job in rows:
+        if mark_no_show_if_expired(db, iv):
+            healed = True
+    if healed:
+        db.commit()
     return [
         CandidateInterviewOut(
             id=str(iv.id),

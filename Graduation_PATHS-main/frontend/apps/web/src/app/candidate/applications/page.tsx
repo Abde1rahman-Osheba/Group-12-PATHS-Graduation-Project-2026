@@ -132,8 +132,43 @@ function stepClickable(step: BackendRoadmapStep, reached: boolean): boolean {
   return reached;
 }
 
+// Canonical pipeline order — used to decide whether the candidate has reached
+// the assessment stage yet.
+function stageRank(stage: string, status: string): number {
+  const code = (stage || "").toLowerCase().replace(/[\s-]+/g, "_");
+  const order: Record<string, number> = {
+    applied: 0, sourced: 0,
+    screening: 1, screen: 1,
+    assessment: 2,
+    interview: 3, hr_interview: 3, tech_interview: 3, mixed_interview: 3,
+    decision: 4, evaluate: 4, offer: 4, offered: 4,
+    hired: 5,
+  };
+  if (code in order) return order[code];
+  const byStatus: Record<string, number> = {
+    applied: 0, screening: 1, interview: 3, offered: 4, hired: 5,
+  };
+  return byStatus[(status || "").toLowerCase()] ?? 0;
+}
+
+const ASSESSMENT_RANK = 2;
+
+// Only reveal an assessment once the candidate has actually reached the
+// assessment stage (or already submitted it). Prefers the real per-job roadmap
+// step state; falls back to the canonical stage order when the pipeline has no
+// explicit assessment step.
+function reachedAssessmentStage(app: AppItem, roadmap: BackendRoadmap): boolean {
+  if (app.assessmentStatus === "submitted") return true;
+  const aStep = roadmap.steps?.find(
+    (s) => (s.kind || "").toLowerCase() === "assessment",
+  );
+  if (aStep) return aStep.state === "done" || aStep.state === "current";
+  return stageRank(app.stage, app.status) >= ASSESSMENT_RANK;
+}
+
 function ApplicationCard({ app }: { app: AppItem }) {
   const roadmap = resolveRoadmap(app);
+  const assessmentReached = reachedAssessmentStage(app, roadmap);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const openStep = roadmap.steps.find((s) => s.key === openKey) ?? null;
@@ -276,8 +311,10 @@ function ApplicationCard({ app }: { app: AppItem }) {
         </div>
       )}
 
-      {/* Assessment — appears when HR has published one for this job */}
-      {app.hasAssessment && !roadmap.terminal && (
+      {/* Assessment — appears only once the candidate has reached the
+          assessment stage (or already submitted it). Before that it stays
+          hidden, even if HR has published one for the job. */}
+      {app.hasAssessment && !roadmap.terminal && assessmentReached && (
         app.assessmentStatus === "submitted" ? (
           <Link
             href={`/candidate/applications/${app.id}/assessment`}

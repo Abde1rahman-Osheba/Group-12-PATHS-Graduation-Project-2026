@@ -440,8 +440,14 @@ export function FindTalentPanel() {
       {showEmpty && result?.provider_available && (
         <div className="rounded-2xl border border-dashed border-border/40 py-12 text-center">
           <Users className="mx-auto mb-3 h-8 w-8 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">No candidates found for this search.</p>
-          <p className="mt-1 text-xs text-muted-foreground/60">Try a broader query or a different source.</p>
+          <p className="mx-auto max-w-md text-sm text-muted-foreground">
+            {result.message || "No candidates found for this search."}
+          </p>
+          {!result.message && (
+            <p className="mt-1 text-xs text-muted-foreground/60">
+              Try a broader query or a different source.
+            </p>
+          )}
         </div>
       )}
 

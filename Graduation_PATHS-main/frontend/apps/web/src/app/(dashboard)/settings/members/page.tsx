@@ -7,8 +7,9 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   UserPlus, Mail, MoreHorizontal, Loader2, CheckCircle2, Copy,
-  RefreshCw, Trash2, Eye, EyeOff, AlertTriangle,
+  RefreshCw, Trash2, Eye, EyeOff, AlertTriangle, ArrowLeft, Send,
 } from "lucide-react";
+import { membersApi } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -306,6 +307,11 @@ export default function MembersPage() {
   // After-resend toast (top of the table) so HR sees the fresh credentials.
   const [resendCreds, setResendCreds] = useState<{ email: string; password: string } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  // Approval step: the exact email (recipient + subject + body) is shown
+  // first; nothing is created or sent until the admin approves it.
+  const [preview, setPreview] = useState<{ to: string; subject: string; body: string } | null>(null);
+  const [pendingForm, setPendingForm] = useState<InviteForm | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const { register, handleSubmit, formState: { errors }, setValue, watch, reset } = useForm<InviteForm>({
     resolver: zodResolver(inviteSchema),
@@ -319,20 +325,47 @@ export default function MembersPage() {
     setDialogOpen(false);
     setCredentials(null);
     setInviteError(null);
+    setPreview(null);
+    setPendingForm(null);
     reset();
   };
 
-  const onInvite = async (data: InviteForm) => {
+  // Step 1 — compose the exact email and show it for approval. Nothing is
+  // created or sent yet.
+  const onPreview = async (data: InviteForm) => {
     setInviteError(null);
+    setPreviewLoading(true);
     try {
-      await invite({
-        orgId,
+      const composed = await membersApi.invitePreview(orgId, {
         full_name: data.full_name,
         email: data.email,
         password: data.password,
         role_code: data.role,
       });
-      setCredentials({ email: data.email, password: data.password });
+      setPendingForm(data);
+      setPreview(composed);
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : "Could not build the email preview.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Step 2 — admin approved the email: create the member + send it.
+  const approveAndSend = async () => {
+    if (!pendingForm) return;
+    setInviteError(null);
+    try {
+      await invite({
+        orgId,
+        full_name: pendingForm.full_name,
+        email: pendingForm.email,
+        password: pendingForm.password,
+        role_code: pendingForm.role,
+      });
+      setCredentials({ email: pendingForm.email, password: pendingForm.password });
+      setPreview(null);
+      setPendingForm(null);
     } catch (e) {
       setInviteError(e instanceof Error ? e.message : "Invite failed.");
     }
@@ -457,13 +490,57 @@ export default function MembersPage() {
 
       {/* Invite dialog */}
       <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) closeDialog(); else setDialogOpen(true); }}>
-        <DialogContent className="glass border-border/60 max-w-sm">
+        <DialogContent className={cn("glass border-border/60", preview && !credentials ? "max-w-lg" : "max-w-sm")}>
           <DialogHeader>
             <DialogTitle className="font-heading text-base flex items-center gap-2">
-              <UserPlus className="h-4 w-4 text-primary" /> Invite Team Member
+              {preview && !credentials ? (
+                <><Mail className="h-4 w-4 text-primary" /> Review invitation email</>
+              ) : (
+                <><UserPlus className="h-4 w-4 text-primary" /> Invite Team Member</>
+              )}
             </DialogTitle>
           </DialogHeader>
-          {credentials ? (
+          {!credentials && preview ? (
+            <div className="space-y-4 py-1">
+              <p className="text-xs text-muted-foreground">
+                This is the exact email that will be sent. Nothing is sent until you approve it.
+              </p>
+              <div className="space-y-2">
+                <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">To</p>
+                  <p className="text-sm font-mono text-foreground">{preview.to}</p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Subject</p>
+                  <p className="text-sm text-foreground">{preview.subject}</p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1">Message</p>
+                  <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90 font-sans">
+                    {preview.body}
+                  </pre>
+                </div>
+              </div>
+              {inviteError && <p className="text-xs text-rose-400">{inviteError}</p>}
+              <DialogFooter className="gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => { setPreview(null); setInviteError(null); }}
+                  disabled={isPending}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back to edit
+                </Button>
+                <Button type="button" size="sm" onClick={approveAndSend} disabled={isPending} className="gap-1.5">
+                  {isPending
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</>
+                    : <><Send className="h-3.5 w-3.5" /> Approve &amp; Send</>}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : credentials ? (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5 text-emerald-400" />
@@ -483,7 +560,7 @@ export default function MembersPage() {
               </DialogFooter>
             </div>
           ) : (
-            <form onSubmit={handleSubmit(onInvite)} className="space-y-4 py-2">
+            <form onSubmit={handleSubmit(onPreview)} className="space-y-4 py-2">
               <div className="space-y-1.5">
                 <Label className="text-sm">Full name</Label>
                 <Input
@@ -546,8 +623,10 @@ export default function MembersPage() {
 
               <DialogFooter>
                 <Button type="button" variant="ghost" size="sm" onClick={closeDialog}>Cancel</Button>
-                <Button type="submit" size="sm" disabled={isPending || !passwordValue} className="gap-1.5">
-                  {isPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</> : <><Mail className="h-3.5 w-3.5" /> Send Invite</>}
+                <Button type="submit" size="sm" disabled={previewLoading || !passwordValue} className="gap-1.5">
+                  {previewLoading
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing…</>
+                    : <><Eye className="h-3.5 w-3.5" /> Preview Email</>}
                 </Button>
               </DialogFooter>
             </form>

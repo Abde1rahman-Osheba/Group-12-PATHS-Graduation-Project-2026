@@ -5,7 +5,7 @@ Interview orchestration: scheduling, question generation, LangGraph analysis, HI
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 
 from sqlalchemy import delete, select
@@ -372,6 +372,111 @@ def mark_completed_if_analyzed(interview: Interview, *, has_analysis: bool) -> b
         interview.status = "completed"
         return True
     return False
+
+
+# ── No-show detection ──────────────────────────────────────────────────
+
+# Statuses that can decay into a no-show once the scheduled window passes.
+_NO_SHOW_ELIGIBLE = {"scheduled", "rescheduled"}
+# Small grace after the scheduled end (late joiners), and a fallback window
+# when only a start time exists.
+_NO_SHOW_GRACE_AFTER_END = timedelta(minutes=15)
+_NO_SHOW_WINDOW_AFTER_START = timedelta(minutes=75)
+
+NO_SHOW_RECOMMENDATION = "no_show"
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _has_join_evidence(db: Session, interview: Interview) -> bool:
+    """True when anyone joined / produced interview material: a transcript
+    (uploaded or live AI-interview turns), an analysis artifact, or a Recall
+    notetaker bot that made it into the call."""
+    if (interview.recall_status or "") in {"in_call", "recording", "done"}:
+        return True
+    if interview.recall_transcript_json:
+        return True
+    for model in (
+        InterviewTranscript,
+        InterviewSummary,
+        InterviewEvaluation,
+        InterviewDecisionPacket,
+    ):
+        if db.execute(
+            select(model.id).where(model.interview_id == interview.id).limit(1)
+        ).first():
+            return True
+    return False
+
+
+def mark_no_show_if_expired(db: Session, interview: Interview) -> bool:
+    """When the scheduled time has passed and nobody ever joined the meeting,
+    mark the interview "no_show" and record a zero-score decision packet —
+    the zero applies to every interview type (hr / technical / mixed).
+
+    Rescheduling the interview clears the auto zero (see patch_reschedule),
+    so a candidate who reschedules is not penalised. Idempotent and safe to
+    call on every read, mirroring ``mark_completed_if_analyzed``."""
+    if interview.status not in _NO_SHOW_ELIGIBLE:
+        return False
+    start = _aware(interview.scheduled_start_time)
+    end = _aware(interview.scheduled_end_time)
+    if end is not None:
+        deadline = end + _NO_SHOW_GRACE_AFTER_END
+    elif start is not None:
+        deadline = start + _NO_SHOW_WINDOW_AFTER_START
+    else:
+        return False  # never actually scheduled to a time
+    if datetime.now(timezone.utc) < deadline:
+        return False
+    if _has_join_evidence(db, interview):
+        return False
+
+    interview.status = "no_show"
+    db.add(interview)
+    # Zero score for ALL interview types until (unless) it is rescheduled.
+    db.add(
+        InterviewDecisionPacket(
+            interview_id=interview.id,
+            application_id=interview.application_id,
+            candidate_id=interview.candidate_id,
+            job_id=interview.job_id,
+            recommendation=NO_SHOW_RECOMMENDATION,
+            final_score=0.0,
+            confidence=1.0,
+            decision_packet_json={
+                "auto": "no_show_zero",
+                "interview_type": interview.interview_type,
+                "hr_score": 0,
+                "technical_score": 0,
+                "reason": (
+                    "The scheduled interview time passed and no one joined "
+                    "the meeting."
+                ),
+                "policy": (
+                    "A no-show scores 0 for all interview types (hr, "
+                    "technical, mixed) unless the interview is rescheduled."
+                ),
+            },
+            human_review_required=False,
+        )
+    )
+    log_interview_action(
+        db,
+        actor_user_id=None,
+        action="interview.no_show_auto",
+        entity_id=interview.id,
+        new_value={"final_score": 0, "reason": "nobody joined before deadline"},
+    )
+    # The session runs with autoflush=False — flush so the zero packet is
+    # immediately visible to queries later in the same request (e.g. the
+    # list endpoint reads the latest packet right after healing).
+    db.flush()
+    return True
 
 
 async def run_full_analysis(

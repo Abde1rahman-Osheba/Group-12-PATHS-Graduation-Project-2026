@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -359,6 +360,39 @@ async def find_talent(
         ) from exc
 
 
+# Generic place words that shouldn't, on their own, make two locations "match"
+# (e.g. "Greater Cairo Area" vs "York Area").
+_LOC_STOPWORDS = {
+    "area", "greater", "metropolitan", "metro", "region", "city", "town",
+    "district", "province", "state", "county", "of", "the", "and", "el",
+}
+
+
+def _loc_tokens(value: str | None) -> set[str]:
+    return {
+        t
+        for t in re.split(r"[^a-z0-9]+", (value or "").lower())
+        if len(t) > 1
+    }
+
+
+def _location_matches(candidate_location: str | None, query_location: str) -> bool:
+    """True when a candidate is "from" the requested location.
+
+    Matching is token-based and fuzzy so "Cairo" matches "Greater Cairo Area,
+    Egypt" and vice-versa. A candidate with no known location cannot be
+    confirmed to be there, so it is excluded while a location filter is active.
+    """
+    q = _loc_tokens(query_location)
+    if not q:
+        return True  # no location specified → no filter
+    cand = _loc_tokens(candidate_location)
+    if not cand:
+        return False  # unknown location: can't confirm "from there"
+    significant = q - _LOC_STOPWORDS or q
+    return bool(significant & cand)
+
+
 async def _run_find_talent(
     db: Session,
     *,
@@ -567,10 +601,46 @@ async def _run_find_talent(
                 )
             )
 
-    # Sort verified Open-to-Work first, then by fit score; renumber ranks.
-    results.sort(key=lambda x: (0 if x.open_to_work else 1, -x.score))
+    # ── 4. Top-K highest match · drop zero fits · enforce location ──────────
+    # (a) Exclude candidates that don't fit the role at all (zero match score).
+    results = [x for x in results if x.score > 0]
+    fit_count = len(results)  # candidates with a real fit, before location gate
+
+    # (b) When a location is specified, keep only candidates from there; with no
+    #     location the search spans all locations.
+    location_filter = (body.location or "").strip()
+    if location_filter:
+        results = [
+            x for x in results if _location_matches(x.location, location_filter)
+        ]
+
+    # (c) Rank strictly by match score (highest first). A verified Open-to-Work
+    #     badge only breaks ties between equally-matched candidates.
+    results.sort(key=lambda x: (-x.score, 0 if x.open_to_work else 1))
+
+    # (d) Keep only the top-K best matches.
+    results = results[: max(1, int(body.count))]
+
     for i, x in enumerate(results, start=1):
         x.rank = i
+
+    if not results and message is None:
+        if location_filter and fit_count > 0:
+            # Candidates were found and fit the role, but none are in the
+            # requested location — explain rather than look "broken".
+            message = (
+                f"Found {fit_count} matching candidate(s), but none are located in "
+                f"“{location_filter}”. The selected source returned profiles from "
+                f"other regions — switch to “All sources” to include your database, "
+                f"or clear the location to search everywhere."
+            )
+        elif location_filter:
+            message = (
+                f"No candidates found in “{location_filter}”. Try a broader location, "
+                f"or clear it to search everywhere."
+            )
+        else:
+            message = "No candidates fit this role. Try broadening your requirements."
 
     return FindTalentResponse(
         batch_id=batch_id,
@@ -586,13 +656,41 @@ async def _run_find_talent(
     response_model=ImportResponseOut,
     status_code=status.HTTP_200_OK,
 )
-def import_external_candidate(
+async def import_external_candidate(
     external_candidate_id: uuid.UUID,
     ctx: OrgContext = Depends(get_current_hiring_org_context),
     _: OrgContext = Depends(require_active_org_status),
     db: Session = Depends(get_db),
 ) -> ImportResponseOut:
-    """Create a candidate account from an external preview row."""
+    """Create a candidate account from an external preview row.
+
+    Best-effort skills enrichment first: LinkedIn search snippets carry no
+    skills, so when the preview row has none we read the person's profile via
+    the MCP and copy the real "Top skills" before the import creates the
+    Candidate — otherwise the new profile shows an empty skills section."""
+    row = db.get(ExternalCandidate, external_candidate_id)
+    if (
+        row is not None
+        and row.organization_id == ctx.organization_id
+        and not (row.skills or [])
+    ):
+        username = _username_from_url(row.profile_url)
+        if username:
+            try:
+                provider = get_sourcing_provider("linkedin_mcp")
+                details = await provider.fetch_profile_details(username=username)
+                if details.get("skills"):
+                    row.skills = list(details["skills"])[:30]
+                    if details.get("open_to_work") is not None:
+                        row.open_to_work_signal = bool(details.get("open_to_work"))
+                    db.commit()
+            except Exception:  # noqa: BLE001 — enrichment is best-effort
+                logger.warning(
+                    "[SourceCandidate] skills enrichment failed for %s — "
+                    "importing without skills", external_candidate_id,
+                )
+                db.rollback()
+
     service = SourceCandidateService()
     try:
         result = service.import_candidate(

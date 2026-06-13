@@ -71,6 +71,23 @@ export default function AssessmentPage({
     );
   }
 
+  // Locked until the candidate reaches the assessment stage (backend-enforced).
+  if (data.status === "locked") {
+    return (
+      <Centered>
+        <AlertTriangle className="mx-auto h-6 w-6 text-amber-400" />
+        <p className="mt-2 text-sm font-semibold text-foreground">Assessment locked</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {data.locked_reason ??
+            "This assessment unlocks once you reach the assessment stage."}
+        </p>
+        <Button asChild variant="ghost" size="sm" className="mt-3">
+          <Link href="/candidate/applications">Back to applications</Link>
+        </Button>
+      </Centered>
+    );
+  }
+
   const onSubmit = () => {
     submit.mutate(answers, {
       onSuccess: (rep) => setLocalReport(rep),

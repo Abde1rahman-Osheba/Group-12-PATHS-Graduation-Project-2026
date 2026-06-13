@@ -59,6 +59,8 @@ def _chat(
     model: str,
     temperature: float,
     max_tokens: int,
+    messages: list[dict[str, str]] | None = None,
+    retry_on_429: bool = True,
 ) -> str:
     if not settings.openrouter_api_key:
         raise OpenRouterClientError("OPENROUTER_API_KEY is not configured")
@@ -69,12 +71,15 @@ def _chat(
         "HTTP-Referer": settings.openrouter_referer or "https://paths.local",
         "X-Title": settings.openrouter_app_title or "PATHS",
     }
+    # A multi-turn `messages` list (system + history + latest user turn) takes
+    # precedence; otherwise fall back to the single system+user shape.
+    chat_messages = messages or [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
     body: dict[str, Any] = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": chat_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
@@ -83,7 +88,9 @@ def _chat(
     for attempt in range(_MAX_429_RETRIES + 1):
         with httpx.Client(timeout=to) as client:
             r = client.post(url, headers=headers, json=body)
-        if r.status_code != 429 or attempt == _MAX_429_RETRIES:
+        # `retry_on_429=False` (the interactive assistant) fails fast so the
+        # caller can fall through to the next model instead of sleeping.
+        if r.status_code != 429 or attempt == _MAX_429_RETRIES or not retry_on_429:
             break
         try:
             retry_after = float(r.headers.get("Retry-After") or 0)
@@ -140,6 +147,44 @@ def _is_model_unavailable(err: str) -> bool:
             "overloaded", " 502", " 503", " 529", "is not a valid model",
         )
     )
+
+
+def generate_chat_response(
+    system_prompt: str,
+    history: list[dict[str, str]],
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 700,
+) -> str:
+    """Return a plain-text assistant reply for a multi-turn conversation.
+
+    ``history`` is a list of ``{"role": "user"|"assistant", "content": ...}``
+    turns (the latest user message last). Uses the same free-model fallback
+    chain as ``generate_json_response`` so rate limits fall through cleanly.
+    """
+    messages = [{"role": "system", "content": system_prompt}, *history]
+    last_err: str | None = None
+    for m in _candidate_models(model):
+        try:
+            return _chat(
+                system_prompt,
+                "",
+                model=m,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                messages=messages,
+                retry_on_429=False,  # fail fast → fall through to next model
+            )
+        except OpenRouterClientError as exc:
+            last_err = str(exc)
+            if _is_model_unavailable(last_err):
+                logger.warning(
+                    "OpenRouter model '%s' unavailable — trying next free model", m,
+                )
+                continue
+            raise
+    raise OpenRouterClientError(last_err or "all candidate models failed")
 
 
 def generate_json_response(

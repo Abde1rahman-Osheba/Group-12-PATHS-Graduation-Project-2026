@@ -12,10 +12,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Loader2, Save, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { jobsApi, type BackendJob } from "@/lib/api";
+import { jobsApi, type BackendJob, type BackendJobWriteBody } from "@/lib/api";
 
 const STATUS_OPTIONS = ["active", "draft", "closed", "inactive"];
 const EMPLOYMENT_OPTIONS = ["full_time", "part_time", "contract", "internship", "temporary"];
@@ -34,6 +34,7 @@ type FormState = {
   requirements: string;
   salary_min: string;
   salary_max: string;
+  skills: string[];
 };
 
 function fieldsFrom(job: BackendJob): FormState {
@@ -49,6 +50,7 @@ function fieldsFrom(job: BackendJob): FormState {
     requirements: job.requirements ?? "",
     salary_min: job.salary_min != null ? String(job.salary_min) : "",
     salary_max: job.salary_max != null ? String(job.salary_max) : "",
+    skills: (job.skills ?? []).map((s) => s.name),
   };
 }
 
@@ -73,7 +75,7 @@ export default function EditJobPage({ params }: { params: Promise<{ id: string }
   }, [job, form]);
 
   const update = useMutation({
-    mutationFn: (body: Partial<BackendJob>) => jobsApi.update(id, body),
+    mutationFn: (body: BackendJobWriteBody) => jobsApi.update(id, body),
     onSuccess: () => {
       toast.success("Job updated.");
       qc.invalidateQueries({ queryKey: ["job", id] });
@@ -87,6 +89,22 @@ export default function EditJobPage({ params }: { params: Promise<{ id: string }
   const set = (k: keyof FormState, v: string) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
 
+  // Required-skills chip input (structured → JobSkillRequirement rows).
+  const [skillDraft, setSkillDraft] = useState("");
+  function addSkill() {
+    const name = skillDraft.trim().replace(/,+$/, "");
+    if (!name) return;
+    setForm((f) => {
+      if (!f) return f;
+      if (f.skills.some((s) => s.toLowerCase() === name.toLowerCase())) return f;
+      return { ...f, skills: [...f.skills, name] };
+    });
+    setSkillDraft("");
+  }
+  function removeSkill(name: string) {
+    setForm((f) => (f ? { ...f, skills: f.skills.filter((s) => s !== name) } : f));
+  }
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form) return;
@@ -94,7 +112,7 @@ export default function EditJobPage({ params }: { params: Promise<{ id: string }
       toast.error("Title is required.");
       return;
     }
-    const body: Partial<BackendJob> = {
+    const body: BackendJobWriteBody = {
       title: form.title.trim(),
       status: form.status,
       location_text: form.location_text.trim() || null,
@@ -106,6 +124,7 @@ export default function EditJobPage({ params }: { params: Promise<{ id: string }
       requirements: form.requirements.trim() || null,
       salary_min: form.salary_min ? Number(form.salary_min) : null,
       salary_max: form.salary_max ? Number(form.salary_max) : null,
+      skills: form.skills,
     };
     update.mutate(body);
   };
@@ -202,6 +221,56 @@ export default function EditJobPage({ params }: { params: Promise<{ id: string }
           <div>
             <label className={labelCls}>Requirements</label>
             <textarea rows={5} className={inputCls + " resize-y"} value={form.requirements} onChange={(e) => set("requirements", e.target.value)} />
+          </div>
+
+          <div>
+            <label className={labelCls}>Required skills</label>
+            <div className="mt-1 flex gap-2">
+              <input
+                className="w-full rounded-lg border border-border/40 bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                value={skillDraft}
+                onChange={(e) => setSkillDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addSkill();
+                  }
+                }}
+                placeholder="e.g. Python — press Enter to add"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addSkill}
+                disabled={!skillDraft.trim()}
+                className="gap-1 shrink-0"
+              >
+                <Plus className="h-4 w-4" /> Add
+              </Button>
+            </div>
+            {form.skills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-2">
+                {form.skills.map((s) => (
+                  <span
+                    key={s}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                  >
+                    {s}
+                    <button
+                      type="button"
+                      onClick={() => removeSkill(s)}
+                      className="rounded-full p-0.5 hover:bg-primary/20"
+                      aria-label={`Remove ${s}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              These show on the job card and count toward candidate match scores.
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-1">

@@ -8,7 +8,7 @@ import { z } from "zod";
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Shield, Workflow,
   ClipboardCheck, FileSearch, Users, Code2, MessageSquare,
-  ArrowUp, ArrowDown, Trash2, Plus, Flag, CheckCircle2,
+  ArrowUp, ArrowDown, Trash2, Plus, Flag, CheckCircle2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,8 @@ const step1Schema = z.object({
   employment_type: z.string().optional(),
   workplace_type: z.string().optional(),
   seniority_level: z.string().optional(),
+  // Required skills for this specific job (chip input).
+  skills: z.array(z.string()).optional(),
 });
 
 const step2Schema = z.object({
@@ -240,6 +242,25 @@ function Step1Form({
     formState: { errors },
   } = useForm<Step1Values>({ resolver: zodResolver(step1Schema), defaultValues });
 
+  // Required-skills chip input: type a skill, press Enter (or +) to add more.
+  const [skillDraft, setSkillDraft] = useState("");
+  const skills = watch("skills") ?? [];
+
+  function addSkill() {
+    const name = skillDraft.trim().replace(/,+$/, "");
+    if (!name) return;
+    if (skills.some((s) => s.toLowerCase() === name.toLowerCase())) {
+      setSkillDraft("");
+      return;
+    }
+    setValue("skills", [...skills, name]);
+    setSkillDraft("");
+  }
+
+  function removeSkill(name: string) {
+    setValue("skills", skills.filter((s) => s !== name));
+  }
+
   return (
     <form onSubmit={handleSubmit(onNext)} className="space-y-5">
       <div className="space-y-1.5">
@@ -318,6 +339,56 @@ function Step1Form({
           placeholder="Describe the role, responsibilities, and team…"
           rows={5}
         />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="skill-input">Required skills</Label>
+        <div className="flex gap-2">
+          <Input
+            id="skill-input"
+            value={skillDraft}
+            onChange={(e) => setSkillDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addSkill();
+              }
+            }}
+            placeholder="e.g. Python — press Enter to add"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addSkill}
+            disabled={!skillDraft.trim()}
+            className="gap-1 shrink-0"
+          >
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+        {skills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1.5">
+            {skills.map((s) => (
+              <span
+                key={s}
+                className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+              >
+                {s}
+                <button
+                  type="button"
+                  onClick={() => removeSkill(s)}
+                  className="rounded-full p-0.5 hover:bg-primary/20"
+                  aria-label={`Remove ${s}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-muted-foreground">
+          These count toward candidate match scores for this job.
+        </p>
       </div>
 
       <div className="flex justify-end">
@@ -553,6 +624,7 @@ export default function NewJobPage() {
       const body = {
         title: step1Data.title!,
         description_text: step1Data.description || undefined,
+        skills: step1Data.skills?.length ? step1Data.skills : undefined,
         location_text: step1Data.location || undefined,
         employment_type: step1Data.employment_type || undefined,
         workplace_type: step1Data.workplace_type || undefined,

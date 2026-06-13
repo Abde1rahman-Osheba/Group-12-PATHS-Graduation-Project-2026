@@ -252,6 +252,7 @@ from app.api.v1.company_knowledge import router as company_knowledge_router  # n
 from app.api.v1.outreach_search import router as outreach_search_router  # noqa: E402
 from app.api.v1.matching_workspace import router as matching_workspace_router  # noqa: E402
 from app.api.v1.jd_analysis import router as jd_analysis_router  # noqa: E402
+from app.api.v1.assistant import router as assistant_router  # noqa: E402
 from app.api.v1.candidate_jobs import router as candidate_jobs_router  # noqa: E402
 from app.api.v1.billing import router as billing_router  # noqa: E402
 from app.api.v1.public import router as public_router  # noqa: E402
@@ -321,6 +322,7 @@ app.include_router(outreach_search_router, prefix="/api/v1")
 app.include_router(matching_workspace_router, prefix="/api/v1")
 # fix8&9 — Candidate-side Job Description Analysis
 app.include_router(jd_analysis_router, prefix="/api/v1")
+app.include_router(assistant_router, prefix="/api/v1")
 # Candidate portal — top matching jobs + per-job AI explanation
 app.include_router(candidate_jobs_router, prefix="/api/v1")
 # Phase 6 — Billing + Public endpoints

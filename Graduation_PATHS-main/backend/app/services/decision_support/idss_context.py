@@ -486,14 +486,19 @@ def _interview_scores(
     )
     for p in analysis_packets:
         pj = p.packet_json if isinstance(p.packet_json, dict) else {}
+        # Attribute by interview type: a separate technical interview feeds
+        # ONLY the technical line, a separate HR interview ONLY the HR line,
+        # and a mixed interview feeds both. Legacy packets without the type
+        # tag behave like mixed (the historical behaviour).
+        ptype = str(pj.get("interview_type") or "mixed").strip().lower()
         t = _interview_norm(pj.get("technical_score"))
         h = _interview_norm(pj.get("hr_score"))
-        if t and t > 0:
+        if ptype != "hr" and t and t > 0:
             tech_scores.append(t)
-            tech_notes.append(f"analysis={p.id} technical={t:.0f}")
-        if h and h > 0:
+            tech_notes.append(f"analysis={p.id} type={ptype} technical={t:.0f}")
+        if ptype != "technical" and h and h > 0:
             hr_scores.append(h)
-            hr_notes.append(f"analysis={p.id} hr={h:.0f}")
+            hr_notes.append(f"analysis={p.id} type={ptype} hr={h:.0f}")
 
     interviews = list(
         db.execute(
@@ -502,6 +507,16 @@ def _interview_scores(
     )
     if not interviews and not analysis_packets:
         return None, ["no_interviews_completed"], None, ["no_interviews_completed"]
+
+    # ── No-shows: the scheduled time passed and nobody joined. Policy: a
+    # no-show that was never rescheduled scores 0 for ALL interview types,
+    # so it drags both the technical and HR averages to zero. ──────────────
+    for inv in interviews:
+        if (inv.status or "").lower() == "no_show":
+            tech_scores.append(0.0)
+            tech_notes.append(f"interview={inv.id} no_show=0")
+            hr_scores.append(0.0)
+            hr_notes.append(f"interview={inv.id} no_show=0")
 
     # ── Fallback source: structured InterviewEvaluation rows (other flow). ──
     for inv in interviews:

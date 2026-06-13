@@ -84,6 +84,45 @@ def send_email(
 # ── Invitation email helper (fix8&9 Update 2) ───────────────────────────────
 
 
+def compose_organization_invite_email(
+    *,
+    to: str,
+    invited_member_name: str,
+    inviter_name: str,
+    organization_name: str,
+    temporary_password: str,
+    inviter_email: str | None = None,
+    login_url: str | None = None,
+) -> dict[str, str]:
+    """Build the invitation email WITHOUT sending it.
+
+    Used by the preview-and-approve flow (the admin sees the exact recipient
+    address, subject and body before anything is sent) and by the actual
+    send. The invitation is written in the organisation's name and identifies
+    the inviter by full name and email address.
+    """
+    inviter_line = (
+        f"{inviter_name} ({inviter_email})" if inviter_email else inviter_name
+    )
+    subject = f"{inviter_name} invited you to join {organization_name} on PATHS"
+    login_line = f"Login URL: {login_url}\n\n" if login_url else ""
+    body = (
+        f"Hello {invited_member_name},\n\n"
+        f"You now have an account on PATHS.\n\n"
+        f"{inviter_line} has invited you to join the organization account of "
+        f"{organization_name}.\n\n"
+        f"You can log in using the following temporary credentials:\n\n"
+        f"Email: {to}\n"
+        f"Temporary Password: {temporary_password}\n\n"
+        f"{login_line}"
+        f"After logging in, please change your password.\n\n"
+        f"Best regards,\n"
+        f"The {organization_name} Team\n"
+        f"(sent on behalf of {organization_name} via PATHS)\n"
+    )
+    return {"to": to, "subject": subject, "body": body}
+
+
 def send_organization_invite_email(
     *,
     to: str,
@@ -91,29 +130,19 @@ def send_organization_invite_email(
     inviter_name: str,
     organization_name: str,
     temporary_password: str,
+    inviter_email: str | None = None,
     login_url: str | None = None,
 ) -> dict[str, Any]:
-    """Send the invitation email with login credentials.
-
-    Body matches the template from fix8&9.md §"Email Content".
-    """
-    subject = (
-        f"You have been invited to join {organization_name} on PATHS"
+    """Send the invitation email with login credentials."""
+    composed = compose_organization_invite_email(
+        to=to,
+        invited_member_name=invited_member_name,
+        inviter_name=inviter_name,
+        organization_name=organization_name,
+        temporary_password=temporary_password,
+        inviter_email=inviter_email,
+        login_url=login_url,
     )
-    login_line = (
-        f"Login URL: {login_url}\n\n"
-        if login_url
-        else ""
+    return send_email(
+        to=composed["to"], subject=composed["subject"], body=composed["body"],
     )
-    body = (
-        f"Hello {invited_member_name},\n\n"
-        f"{inviter_name} has added you to the organization account of "
-        f"{organization_name} on PATHS.\n\n"
-        f"You can log in using the following temporary credentials:\n\n"
-        f"Email: {to}\n"
-        f"Temporary Password: {temporary_password}\n\n"
-        f"{login_line}"
-        f"After logging in, please change your password.\n\n"
-        f"Best regards,\nPATHS Team\n"
-    )
-    return send_email(to=to, subject=subject, body=body)

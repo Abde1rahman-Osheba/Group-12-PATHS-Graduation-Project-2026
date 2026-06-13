@@ -20,6 +20,7 @@ from app.db.models.application import Application
 from app.db.models.job import Job
 from app.db.models.scoring import CandidateJobScore
 from app.schemas.application import ApplicationOut, ShortlistItemOut, StageTransitionRequest
+from app.services.candidate_job_match_service import candidate_job_match_score
 from app.services.hiring_pipeline import build_candidate_roadmap, pipeline_for_job
 
 router = APIRouter(tags=["Applications"])
@@ -33,6 +34,7 @@ VALID_STAGES = {
 def _app_out(
     app: Application,
     score: CandidateJobScore | None = None,
+    fallback_match: float | None = None,
 ) -> ApplicationOut:
     cand = app.candidate
     title = None
@@ -45,6 +47,11 @@ def _app_out(
     if score is not None:
         match_final = float(score.final_score) if score.final_score is not None else None
         match_conf = float(score.confidence) if score.confidence is not None else None
+    # No row in candidate_job_scores (the optional scoring agent's table) —
+    # fall back to the live skills/title blend so this list agrees with the
+    # per-job Candidates tab and the candidate's own dashboard.
+    if match_final is None:
+        match_final = fallback_match
     # The candidate has a match score (so their CV has been screened) when they
     # have skills/title to match on, or an explicit screening score exists.
     has_match = bool(cand and ((cand.skills or []) or cand.current_title)) or (
@@ -105,7 +112,19 @@ def list_applications(
             )
         ).scalars().all()
         score_map = {(s.candidate_id, s.job_id): s for s in score_rows}
-    return [_app_out(r, score_map.get((r.candidate_id, r.job_id))) for r in rows]
+    out: list[ApplicationOut] = []
+    blend_cache: dict[tuple[object, object], float | None] = {}
+    for r in rows:
+        s = score_map.get((r.candidate_id, r.job_id))
+        fallback: float | None = None
+        if (s is None or s.final_score is None) and r.job is not None:
+            key = (r.candidate_id, r.job_id)
+            if key not in blend_cache:
+                m = candidate_job_match_score(db, candidate_id=r.candidate_id, job=r.job)
+                blend_cache[key] = float(m[0]) if m else None
+            fallback = blend_cache[key]
+        out.append(_app_out(r, s, fallback_match=fallback))
+    return out
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationOut)
@@ -126,7 +145,11 @@ def get_application(
             CandidateJobScore.job_id == app.job_id,
         ).limit(1)
     ).scalar_one_or_none()
-    return _app_out(app, score)
+    fallback: float | None = None
+    if score is None or score.final_score is None:
+        m = candidate_job_match_score(db, candidate_id=app.candidate_id, job=job)
+        fallback = float(m[0]) if m else None
+    return _app_out(app, score, fallback_match=fallback)
 
 
 @router.get("/jobs/{job_id}/applications", response_model=list[ApplicationOut])
@@ -155,7 +178,19 @@ def list_job_applications(
             )
         ).scalars().all()
         score_map = {(s.candidate_id, s.job_id): s for s in score_rows}
-    return [_app_out(r, score_map.get((r.candidate_id, r.job_id))) for r in rows]
+    out: list[ApplicationOut] = []
+    blend_cache: dict[tuple[object, object], float | None] = {}
+    for r in rows:
+        s = score_map.get((r.candidate_id, r.job_id))
+        fallback: float | None = None
+        if (s is None or s.final_score is None) and r.job is not None:
+            key = (r.candidate_id, r.job_id)
+            if key not in blend_cache:
+                m = candidate_job_match_score(db, candidate_id=r.candidate_id, job=r.job)
+                blend_cache[key] = float(m[0]) if m else None
+            fallback = blend_cache[key]
+        out.append(_app_out(r, s, fallback_match=fallback))
+    return out
 
 
 @router.patch("/applications/{application_id}/stage", response_model=ApplicationOut)
@@ -187,7 +222,11 @@ def advance_stage(
             CandidateJobScore.job_id == app.job_id,
         ).limit(1)
     ).scalar_one_or_none()
-    return _app_out(app, score)
+    fallback: float | None = None
+    if score is None or score.final_score is None:
+        m = candidate_job_match_score(db, candidate_id=app.candidate_id, job=job)
+        fallback = float(m[0]) if m else None
+    return _app_out(app, score, fallback_match=fallback)
 
 
 @router.get("/jobs/{job_id}/shortlist", response_model=list[ShortlistItemOut])

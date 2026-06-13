@@ -52,6 +52,10 @@ export interface BackendJob {
   max_years_experience: number | null;
   is_active: boolean;
   applicant_count: number;
+  // Per-stage applicant counts for the jobs-list mini pipeline chart.
+  pipeline_breakdown?: { stage: string; label: string; count: number }[];
+  // Recruiter-entered required skills (job_skill_requirements rows).
+  skills?: { name: string; required: boolean }[];
   summary?: string | null;
   description_text?: string | null;
   description?: string | null;
@@ -242,14 +246,20 @@ export interface BackendScreeningSourceCandidate {
   already_applied: boolean;
 }
 
+// Write payload for creating/updating a job. Skills are sent as plain
+// strings (the backend turns them into job_skill_requirements rows).
+export type BackendJobWriteBody = Partial<Omit<BackendJob, "skills">> & {
+  skills?: string[];
+};
+
 export const jobsApi = {
   list: (filters: JobsListFilters = {}) =>
     api.get<BackendJob[]>(`/api/v1/jobs${jobsListQuery(filters)}`),
   get: (jobId: string) =>
     api.get<BackendJob>(`/api/v1/jobs/${jobId}`),
-  create: (body: Partial<BackendJob>) =>
+  create: (body: BackendJobWriteBody) =>
     api.post<BackendJob>("/api/v1/jobs", body),
-  update: (jobId: string, body: Partial<BackendJob>) =>
+  update: (jobId: string, body: BackendJobWriteBody) =>
     api.patch<BackendJob>(`/api/v1/jobs/${jobId}`, body),
   // Permanently delete an org's job (and its dependent records). 204 No Content.
   delete: (jobId: string) => api.delete<void>(`/api/v1/jobs/${jobId}`),
@@ -332,6 +342,16 @@ export const membersApi = {
       invited_at?: string | null;
     }>(
       `/api/v1/organizations/${orgId}/members`,
+      body,
+    ),
+  // Compose the exact invite email (to/subject/body) for review — nothing is
+  // created or sent until the admin approves and the real invite call runs.
+  invitePreview: (
+    orgId: string,
+    body: { full_name: string; email: string; password: string; role_code: string },
+  ) =>
+    api.post<{ to: string; subject: string; body: string }>(
+      `/api/v1/organizations/${orgId}/members/invite-preview`,
       body,
     ),
   // fix8&9 — resend invite + delete member
@@ -558,7 +578,10 @@ export interface BackendCandidateAssessment {
   job_id: string | null;
   job_title: string | null;
   available: boolean;
-  status: "not_started" | "submitted";
+  // "locked" → the candidate hasn't reached the assessment stage yet.
+  status: "not_started" | "submitted" | "locked";
+  locked?: boolean;
+  locked_reason?: string;
   assessment: {
     id: string;
     title: string;
@@ -1693,6 +1716,54 @@ export const outreachAgentApi = {
   history: (candidateId: string) =>
     api.get<{ candidate_id: string; items: BackendOutreachHistoryItem[] }>(
       `/api/v1/outreach/${candidateId}/history`,
+    ),
+  // Complete-profile outreach: invite the candidate to create their own
+  // account on PATHS. No booking link / availability / Google involved.
+  profileCompletionGenerate: (body: { candidate_id: string }) =>
+    api.post<{ subject: string; body: string; signup_url: string }>(
+      "/api/v1/outreach/profile-completion/generate",
+      body,
+    ),
+  profileCompletionSend: (body: {
+    candidate_id: string;
+    subject: string;
+    body: string;
+    recipient_email?: string;
+  }) =>
+    api.post<{ ok: boolean; provider?: string; recipient: string }>(
+      "/api/v1/outreach/profile-completion/send",
+      body,
+    ),
+};
+
+// ── In-app context-aware assistant (floating support chatbot) ─────────────
+export interface BackendAssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at?: string | null;
+}
+
+function assistantQuery(contextKey: string, entityId?: string | null): string {
+  const parts = [`context_key=${encodeURIComponent(contextKey)}`];
+  if (entityId) parts.push(`entity_id=${encodeURIComponent(entityId)}`);
+  return parts.join("&");
+}
+
+export const assistantApi = {
+  chat: (body: { context_key: string; entity_id?: string | null; message: string }) =>
+    api.post<{ reply: string; context_key: string; entity_id?: string | null }>(
+      "/api/v1/assistant/chat",
+      body,
+    ),
+  history: (contextKey: string, entityId?: string | null) =>
+    api.get<{
+      context_key: string;
+      entity_id?: string | null;
+      items: BackendAssistantMessage[];
+    }>(`/api/v1/assistant/history?${assistantQuery(contextKey, entityId)}`),
+  clear: (contextKey: string, entityId?: string | null) =>
+    api.delete<void>(
+      `/api/v1/assistant/history?${assistantQuery(contextKey, entityId)}`,
     ),
 };
 

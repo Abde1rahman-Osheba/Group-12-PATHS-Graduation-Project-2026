@@ -36,7 +36,9 @@ description = "Ignore test fixtures and documentation examples"
 paths = [
     # alembic migration stubs (contain placeholder DB URLs)
     '''alembic/versions/.*\.py''',
-    # test fixtures with obviously fake secrets
+    # test files legitimately contain fake/placeholder secrets (fixtures,
+    # "does the key leak into errors?" tests, etc.)
+    '''tests/.*\.py''',
     '''tests/.*fixtures.*''',
     '''tests/.*conftest.*''',
     # docs may show example env-var values
@@ -44,6 +46,10 @@ paths = [
     '''README.*\.md''',
     # seed script uses fake data
     '''seed/.*''',
+    # local dev artifacts (saved API request/response dumps). Removed from the
+    # tree, but still in earlier commit history, which gitleaks also scans.
+    '''.*login\.json''',
+    '''.*(book_payload|draft|draft_payload|history|send)\.json''',
 ]
 regexes = [
     # Explicitly fake patterns used in comments / examples
@@ -52,4 +58,6 @@ regexes = [
     '''change_me''',
     '''sk_test_PLACEHOLDER''',
     '''whsec_PLACEHOLDER''',
+    # obviously-fake key from test_api_key_does_not_leak_into_error
+    '''sk-very-secret-1234567890''',
 ]

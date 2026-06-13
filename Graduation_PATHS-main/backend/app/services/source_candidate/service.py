@@ -350,6 +350,10 @@ class SourceCandidateService:
             row.imported_candidate_id = existing.id
             row.import_status = "duplicate"
             row.imported_at = datetime.now(timezone.utc)
+            # Backfill: the external row may carry skills the existing
+            # profile lacks (e.g. enriched from the LinkedIn profile read).
+            if not (existing.skills or []) and (row.skills or []):
+                existing.skills = list(row.skills)
             _ensure_candidate_source(
                 db,
                 candidate_id=existing.id,

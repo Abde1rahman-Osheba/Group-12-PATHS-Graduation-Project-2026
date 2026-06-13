@@ -288,7 +288,9 @@ def _fallback_one(
     if job_ctx and job_ctx.get("title"):
         if _terms(job_ctx["title"]) & _terms(c.current_title or c.headline or ""):
             score = max(score, 60.0)
-    score = max(5.0, min(99.0, score))
+    # Floor at 0 (not a positive value): a candidate with no overlap at all is a
+    # "zero fit" and is filtered out of Find Talent results upstream.
+    score = max(0.0, min(99.0, score))
 
     why = (
         f"Title/keywords overlap with the role ({', '.join(sorted(overlap)[:5]) or 'partial match'})."

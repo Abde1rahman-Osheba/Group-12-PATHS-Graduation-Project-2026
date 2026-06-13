@@ -105,6 +105,29 @@ function assertRealJwtIfRequired(path: string): void {
   }
 }
 
+const SESSION_EXPIRED_MSG = "Your session has expired — please sign in again.";
+
+/**
+ * A 401 on a request that DID carry a token means the JWT expired (tokens
+ * have a finite lifetime) or was invalidated. Clear the dead session and send
+ * the user to the login page instead of surfacing a cryptic
+ * "Could not validate credentials" inside whatever they were doing.
+ * Returns true when a redirect was triggered.
+ */
+function handleExpiredSession(status: number, path: string, hadToken: boolean): boolean {
+  if (status !== 401 || !hadToken) return false;
+  if (typeof window === "undefined") return false;
+  // Never hijack auth endpoints (a wrong password is a legitimate 401) and
+  // never loop when already on the login page.
+  if (path.includes("/auth/")) return false;
+  if (window.location.pathname.startsWith("/login")) return false;
+  try {
+    localStorage.removeItem("paths-auth");
+  } catch { /* ignore */ }
+  window.location.href = "/login";
+  return true;
+}
+
 async function requestForm<T>(path: string, body: FormData): Promise<T> {
   assertRealJwtIfRequired(path);
   const token = getToken();
@@ -114,6 +137,9 @@ async function requestForm<T>(path: string, body: FormData): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, { method: "POST", headers, body });
 
   if (!res.ok) {
+    if (handleExpiredSession(res.status, path, Boolean(token))) {
+      throw new ApiError(401, SESSION_EXPIRED_MSG);
+    }
     let detail = `HTTP ${res.status}`;
     try { const err = await res.json(); detail = formatErrorDetail(err?.detail) ?? detail; } catch { /* ignore */ }
     throw new ApiError(res.status, detail);
@@ -161,6 +187,9 @@ async function requestBlob(path: string, opts?: RequestOptions): Promise<Blob> {
   }
   if (timer) clearTimeout(timer);
   if (!res.ok) {
+    if (handleExpiredSession(res.status, path, Boolean(token))) {
+      throw new ApiError(401, SESSION_EXPIRED_MSG);
+    }
     let detail = `HTTP ${res.status}`;
     try {
       const err = await res.json();
@@ -215,6 +244,9 @@ async function request<T>(
   if (timer) clearTimeout(timer);
 
   if (!res.ok) {
+    if (handleExpiredSession(res.status, path, Boolean(token))) {
+      throw new ApiError(401, SESSION_EXPIRED_MSG);
+    }
     let detail = `HTTP ${res.status}`;
     try {
       const err = await res.json();

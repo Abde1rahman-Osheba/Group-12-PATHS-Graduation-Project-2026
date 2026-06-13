@@ -30,7 +30,7 @@ import {
   useSaveOutreachDraft,
   useSendOutreachAgent,
 } from "@/lib/hooks";
-import type { BackendOutreachCreateBody } from "@/lib/api";
+import { outreachAgentApi, type BackendOutreachCreateBody } from "@/lib/api";
 
 /** Local LabeledInput wrapper — the project's `Input` doesn't take `label`. */
 function L({
@@ -70,8 +70,11 @@ const DEFAULT_WINDOWS: AvailabilityWindow[] = [
   { day_of_week: 4, start_time: "10:00", end_time: "12:00" },
 ];
 
-/** The interview HR can outreach for — the email is drafted differently for each. */
-const INTERVIEW_TYPES: { value: string; title: string; desc: string }[] = [
+/** Purpose of the "complete your profile / create your account" outreach. */
+const PROFILE_COMPLETION = "Complete Profile";
+
+/** What HR can outreach for — the email is drafted differently for each. */
+const OUTREACH_PURPOSES: { value: string; title: string; desc: string }[] = [
   {
     value: "HR Interview",
     title: "HR Interview",
@@ -86,6 +89,11 @@ const INTERVIEW_TYPES: { value: string; title: string; desc: string }[] = [
     value: "Mixed Interview",
     title: "Mixed Interview",
     desc: "Get to know the person and their ability to adapt to the company's environment.",
+  },
+  {
+    value: PROFILE_COMPLETION,
+    title: "Complete Profile Request",
+    desc: "Invite the candidate to create their own account on PATHS and complete their profile.",
   },
 ];
 
@@ -166,21 +174,31 @@ export function OutreachModal({
     return () => window.removeEventListener("message", onMessage);
   }, [refetchGoogle]);
 
-  const canSend =
-    Boolean(googleStatus?.connected) &&
-    Boolean(recipient.trim()) &&
-    Boolean(subject.trim()) &&
-    body.includes("{{SCHEDULING_LINK}}");
+  // "Complete Profile Request" sends a plain email (no booking link, no HR
+  // availability, no Google dependency) — gates differ accordingly.
+  const isProfileCompletion = interviewType === PROFILE_COMPLETION;
+  const [pcSending, setPcSending] = useState(false);
+
+  const canSend = isProfileCompletion
+    ? Boolean(recipient.trim()) && Boolean(subject.trim()) && Boolean(body.trim())
+    : Boolean(googleStatus?.connected) &&
+      Boolean(recipient.trim()) &&
+      Boolean(subject.trim()) &&
+      body.includes("{{SCHEDULING_LINK}}");
 
   const sendBlockedReason = useMemo(() => {
     if (!recipient.trim()) return "Candidate has no email — set one before sending.";
     if (!subject.trim()) return "Subject is required.";
+    if (isProfileCompletion) {
+      if (!body.trim()) return "Email body is required.";
+      return null;
+    }
     if (!body.includes("{{SCHEDULING_LINK}}"))
       return "Body must keep the {{SCHEDULING_LINK}} placeholder.";
     if (!googleStatus?.connected)
       return "Connect Google Calendar and Gmail to send outreach.";
     return null;
-  }, [recipient, subject, body, googleStatus?.connected]);
+  }, [recipient, subject, body, googleStatus?.connected, isProfileCompletion]);
 
   function buildPayload(): BackendOutreachCreateBody {
     return {
@@ -205,6 +223,22 @@ export function OutreachModal({
   async function onGenerate(typeOverride?: string) {
     const t = typeOverride ?? interviewType ?? "HR Interview";
     setFeedback(null);
+    // Complete-profile request → deterministic invite to create an account.
+    if (t === PROFILE_COMPLETION) {
+      try {
+        const r = await outreachAgentApi.profileCompletionGenerate({
+          candidate_id: candidate.id,
+        });
+        setSubject(r.subject);
+        setBody(r.body);
+      } catch (e) {
+        setFeedback({
+          type: "error",
+          message: e instanceof Error ? e.message : "Could not generate email.",
+        });
+      }
+      return;
+    }
     try {
       const r = await generate.mutateAsync({
         candidate_id: candidate.id,
@@ -259,6 +293,31 @@ export function OutreachModal({
       return;
     }
     setFeedback(null);
+    // Complete-profile request → plain email, no booking link / calendar.
+    if (isProfileCompletion) {
+      setPcSending(true);
+      try {
+        await outreachAgentApi.profileCompletionSend({
+          candidate_id: candidate.id,
+          subject: subject.trim(),
+          body,
+          recipient_email: recipient.trim() || undefined,
+        });
+        setFeedback({
+          type: "success",
+          message:
+            "Outreach sent. The candidate received an invitation to create their account and complete their profile.",
+        });
+      } catch (e) {
+        setFeedback({
+          type: "error",
+          message: e instanceof Error ? e.message : "Could not send outreach.",
+        });
+      } finally {
+        setPcSending(false);
+      }
+      return;
+    }
     try {
       const r = await send.mutateAsync(buildPayload());
       if (!r.ok) {
@@ -327,12 +386,15 @@ export function OutreachModal({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Google connection state */}
-        <GoogleStatusBanner
-          status={googleStatus}
-          onConnect={() => void onConnectGoogle()}
-          connecting={connect.isPending}
-        />
+        {/* Google connection state — irrelevant for a complete-profile
+            request (plain email, no calendar). */}
+        {!isProfileCompletion && (
+          <GoogleStatusBanner
+            status={googleStatus}
+            onConnect={() => void onConnectGoogle()}
+            connecting={connect.isPending}
+          />
+        )}
 
         {feedback && (
           <div
@@ -368,13 +430,13 @@ export function OutreachModal({
           </div>
         </div>
 
-        {/* Interview type chooser — asked before drafting; the email is tailored to it. */}
+        {/* Purpose chooser — asked before drafting; the email is tailored to it. */}
         <div className="space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Which interview is this outreach for?
+            What is this outreach for?
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {INTERVIEW_TYPES.map((it) => {
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {OUTREACH_PURPOSES.map((it) => {
               const selected = interviewType === it.value;
               return (
                 <button
@@ -402,11 +464,11 @@ export function OutreachModal({
           </div>
         </div>
 
-        {/* Email editor — only after an interview type is chosen */}
+        {/* Email editor — only after a purpose is chosen */}
         {!interviewType ? (
           <div className="rounded-xl border border-dashed border-border/50 px-4 py-8 text-center">
             <Sparkles className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="text-sm font-medium text-muted-foreground">Pick an interview type above</p>
+            <p className="text-sm font-medium text-muted-foreground">Pick what this outreach is for above</p>
             <p className="mt-0.5 text-[12px] text-muted-foreground/70">
               The Outreach Agent will draft an email tailored to your choice.
             </p>
@@ -415,17 +477,19 @@ export function OutreachModal({
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-primary/30 bg-primary/5 text-[11px] text-primary">
-              {interviewType}
+              {isProfileCompletion ? "Complete Profile Request" : interviewType}
             </Badge>
             <Button size="sm" variant="secondary" onClick={() => void onGenerate()} disabled={generate.isPending}>
               {generate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
               {subject || body ? "Regenerate" : "Generate Email"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => void onSaveDraft()} disabled={saveDraft.isPending}>
-              {saveDraft.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-              Save Draft
-            </Button>
-            {previewLink && (
+            {!isProfileCompletion && (
+              <Button size="sm" variant="ghost" onClick={() => void onSaveDraft()} disabled={saveDraft.isPending}>
+                {saveDraft.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                Save Draft
+              </Button>
+            )}
+            {!isProfileCompletion && previewLink && (
               <a
                 href={previewLink}
                 target="_blank"
@@ -454,7 +518,7 @@ export function OutreachModal({
 
           <div>
             <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Body (must keep {"{{SCHEDULING_LINK}}"})
+              {isProfileCompletion ? "Body" : <>Body (must keep {"{{SCHEDULING_LINK}}"})</>}
             </label>
             <Textarea
               rows={10}
@@ -466,7 +530,9 @@ export function OutreachModal({
         </div>
         )}
 
-        {/* Availability + interview details */}
+        {/* Availability + interview details — not needed for a
+            complete-profile request (plain email, nothing to schedule). */}
+        {!isProfileCompletion && (
         <div className="space-y-3 rounded-xl border border-border/40 bg-muted/20 p-3">
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-muted-foreground">
             <CalendarIcon className="h-3 w-3" /> HR availability
@@ -545,6 +611,7 @@ export function OutreachModal({
             </Button>
           </div>
         </div>
+        )}
 
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
           <div className="text-[12px] text-muted-foreground">
@@ -556,10 +623,10 @@ export function OutreachModal({
             </Button>
             <Button
               onClick={() => void onSend()}
-              disabled={!canSend || send.isPending}
+              disabled={!canSend || send.isPending || pcSending}
               title={sendBlockedReason ?? undefined}
             >
-              {send.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              {send.isPending || pcSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
               Send Outreach
             </Button>
           </div>

@@ -594,6 +594,11 @@ async def node_decision_support(state: dict[str, Any]) -> dict[str, Any]:
     out["final_score"] = final_score_100
     out["hr_score"] = hr_s
     out["technical_score"] = tech_s
+    # Self-describe the packet so downstream consumers (the IDSS rubric) can
+    # attribute scores by interview type: a separate technical interview feeds
+    # only the technical line, a separate HR interview only the HR line, and a
+    # mixed interview feeds both.
+    out["interview_type"] = itype
     out["job_match_score"] = round(match_s, 2) if match_s is not None else None
     out["human_review_required"] = True
     cstatus = (comp.get("compliance_status") or "pass").lower()

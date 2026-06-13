@@ -197,6 +197,7 @@ def create_member(
             to=new_user.email,
             invited_member_name=new_user.full_name or new_user.email,
             inviter_name=(current_user.full_name or current_user.email),
+            inviter_email=current_user.email,
             organization_name=org.name,
             temporary_password=data.password,
             login_url=settings.outreach_public_base_url
@@ -280,6 +281,7 @@ def resend_invite_email(
         to=user.email,
         invited_member_name=user.full_name or user.email,
         inviter_name=(current_user.full_name or current_user.email),
+        inviter_email=current_user.email,
         organization_name=org_name,
         temporary_password=temporary_password or "(unchanged)",
         login_url=settings.outreach_public_base_url

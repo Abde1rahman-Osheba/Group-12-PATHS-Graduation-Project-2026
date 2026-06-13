@@ -5,16 +5,20 @@ Powers the candidate portal dashboard "Top Matches for You" section.
 Match score is a **blend**, not raw cosine. Pure embedding cosine over
 nomic-embed text vectors is almost always positive (0.6–0.8) for *any* two
 job-ish documents, so it cannot tell a relevant role from an irrelevant one
-and inflates every score into the 80s. We instead combine:
+and inflates every score into the 80s. Skills must therefore dominate, the
+title is a small tie-breaker, and the cosine is de-inflated and contributes
+least (see ``_blended_score``):
 
-    score = 0.50 · semantic        (cosine, clamped to [0,1])
-          + 0.45 · skill_overlap   (candidate skills the job actually mentions)
-          + 0.05 · title_overlap   (candidate title vs job title tokens)
+    with an embedding:   score = 0.70 · skill_fit   (saturating skill overlap, 1 − e^(−n/2))
+                               + 0.22 · title_fit   (Jaccard of stop-stripped title tokens)
+                               + 0.08 · semantic    (de-inflated cosine: 0.55→0, 0.85→1)
 
-so a job in an unrelated domain (no shared skills, no title overlap) keeps
-only its ~0.5·cosine ≈ 35% and falls below the threshold, while a genuine
-skills match rises. The percentage is therefore explainable: it tracks how
-many of the candidate's real skills the job needs.
+    without an embedding: score = 0.75 · skill_fit + 0.25 · title_fit
+
+so a job in an unrelated domain (no shared skills, no title overlap) sinks
+below the threshold, while a genuine skills match rises. The percentage is
+therefore explainable: it tracks how many of the candidate's real skills the
+job needs.
 
 Two entry points:
   * :pyfunc:`top_matching_jobs`  — best-fitting active jobs (score ≥ threshold).

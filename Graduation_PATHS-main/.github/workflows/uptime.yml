@@ -23,6 +23,10 @@ jobs:
     name: "🩺 Uptime ping"
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # The `secrets` context is NOT allowed inside step `if:` expressions, but
+    # the `env` context is — so surface the webhook here and gate on env below.
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - name: Check backend health  (/api/v1/health)
@@ -146,9 +150,9 @@ jobs:
 
       # ── On failure: notify Slack ─────────────────────────────────────────
       - name: Slack alert
-        if: failure() && steps.evaluate.outputs.failed == '1' && secrets.SLACK_WEBHOOK_URL != ''
+        if: failure() && steps.evaluate.outputs.failed == '1' && env.SLACK_WEBHOOK_URL != ''
         run: |
-          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d '{
               "text": ":rotating_light: *PATHS uptime check failed*",

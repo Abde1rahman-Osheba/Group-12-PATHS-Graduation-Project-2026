@@ -650,6 +650,24 @@ def _notify_tutor(db: Session, *, template: Assessment, job, cand: Candidate, re
         logger.exception("[Assessment] tutor notification failed")
 
 
+# Canonical pipeline order — the assessment is locked until the candidate
+# reaches the assessment stage (rank >= 2).
+_ASSESSMENT_STAGE_RANK: dict[str, int] = {
+    "applied": 0, "sourced": 0,
+    "screening": 1, "screen": 1,
+    "assessment": 2,
+    "interview": 3, "hr_interview": 3, "tech_interview": 3, "mixed_interview": 3,
+    "decision": 4, "evaluate": 4, "offer": 4, "offered": 4,
+    "hired": 5, "accepted": 5,
+}
+
+
+def _reached_assessment_stage(app) -> bool:
+    """True once the application has reached (or passed) the assessment stage."""
+    code = (app.current_stage_code or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return _ASSESSMENT_STAGE_RANK.get(code, 0) >= 2
+
+
 @router.get("/me/applications/{app_id}/assessment")
 async def get_application_assessment(
     app_id: uuid.UUID,
@@ -662,6 +680,23 @@ async def get_application_assessment(
     job = app.job
     template = _published_template(db, app.job_id) if app.job_id else None
     attempt = _attempt_for(db, app.id, cand.id)
+
+    # Locked until the candidate reaches the assessment stage. A candidate who
+    # already submitted keeps access to their report regardless of stage.
+    if template is not None and attempt is None and not _reached_assessment_stage(app):
+        return {
+            "application_id": str(app.id),
+            "job_id": str(app.job_id) if app.job_id else None,
+            "job_title": job.title if job else None,
+            "available": False,
+            "locked": True,
+            "status": "locked",
+            "locked_reason": (
+                "This assessment unlocks once you reach the assessment stage."
+            ),
+            "assessment": None,
+            "report": None,
+        }
 
     payload: dict = {
         "application_id": str(app.id),
@@ -713,6 +748,13 @@ async def submit_application_assessment(
     if existing is not None:
         # Idempotent — return the existing report instead of double-grading.
         return _attempt_report(existing)
+
+    # Can't take an assessment before reaching the assessment stage.
+    if not _reached_assessment_stage(app):
+        raise HTTPException(
+            status_code=403,
+            detail="This assessment is not available yet — you have not reached the assessment stage.",
+        )
 
     questions = template.questions if isinstance(template.questions, list) else []
     job = app.job

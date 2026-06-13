@@ -53,6 +53,29 @@ class PipelineStageOut(BaseModel):
     group: str = "interview"
 
 
+class PipelineCountOut(BaseModel):
+    """Per-stage applicant count for the jobs-list mini bar chart."""
+
+    stage: str
+    label: str
+    count: int
+
+
+# Pipeline-ordered stages with their display labels (mirrors the frontend).
+_STAGE_LABELS: list[tuple[str, str]] = [
+    ("applied", "Applied"),
+    ("sourced", "Sourced"),
+    ("screening", "Screening"),
+    ("assessment", "Assessment"),
+    ("hr_interview", "HR Interview"),
+    ("tech_interview", "Tech Interview"),
+    ("decision", "Decision"),
+    ("hired", "Hired"),
+    ("rejected", "Rejected"),
+    ("withdrawn", "Withdrawn"),
+]
+
+
 class JobOut(BaseModel):
     id: UUID
     title: str
@@ -86,6 +109,10 @@ class JobOut(BaseModel):
     job_url: str | None = None
     source_url: str | None = None
     hiring_pipeline: list[PipelineStageOut] = Field(default_factory=list)
+    # Per-stage applicant counts (only stages with at least one applicant).
+    pipeline_breakdown: list[PipelineCountOut] = Field(default_factory=list)
+    # Structured skill requirements (job_skill_requirements rows).
+    skills: list["JobSkillOut"] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -112,6 +139,98 @@ class JobCreateRequest(BaseModel):
     min_years_experience: int | None = None
     max_years_experience: int | None = None
     hiring_pipeline: list[PipelineStageIn] | None = None
+    # Required skills typed by the recruiter in Basic Info (chip input).
+    skills: list[str] | None = None
+
+
+class JobSkillOut(BaseModel):
+    name: str
+    required: bool = True
+
+
+_REQUIRED_SKILLS_MARKER = "Required skills:"
+
+
+def _clean_skill_list(skills: list[str] | None) -> list[str]:
+    """Trim, de-duplicate (case-insensitive) and cap the recruiter's skills."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in skills or []:
+        name = " ".join(str(s).split()).strip(" ,;")
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        out.append(name[:120])
+        if len(out) >= 30:
+            break
+    return out
+
+
+def _apply_skills_to_requirements(req_text: str | None, skills: list[str]) -> str | None:
+    """Mirror the structured skills into the requirements TEXT under a marker
+    line, replacing any previous marker line. The match scorer and the IDSS
+    job_requirement_match both scan this text, so typed skills immediately
+    count toward candidate matching."""
+    base = (req_text or "").strip()
+    # Drop any line we previously generated.
+    kept = [
+        ln for ln in base.splitlines()
+        if not ln.strip().lower().startswith(_REQUIRED_SKILLS_MARKER.lower())
+    ]
+    base = "\n".join(kept).strip()
+    if not skills:
+        return base or None
+    line = f"{_REQUIRED_SKILLS_MARKER} {', '.join(skills)}"
+    return f"{base}\n\n{line}" if base else line
+
+
+def _replace_job_skill_rows(db: Session, job_id: UUID, skills: list[str]) -> None:
+    """Recruiter skills become job_skill_requirements rows (is_required=True)."""
+    from app.db.models.job_ingestion import JobSkillRequirement
+
+    db.execute(
+        sa_delete(JobSkillRequirement).where(
+            JobSkillRequirement.job_id == job_id,
+            JobSkillRequirement.extracted_by == "recruiter",
+        ),
+        execution_options={"synchronize_session": False},
+    )
+    for name in skills:
+        db.add(
+            JobSkillRequirement(
+                job_id=job_id,
+                skill_name_raw=name,
+                skill_name_normalized=name.lower(),
+                importance_weight=1.0,
+                is_required=True,
+                extracted_by="recruiter",
+            )
+        )
+
+
+def _skills_for_jobs(db: Session, job_ids: list[UUID]) -> dict[UUID, list[JobSkillOut]]:
+    from app.db.models.job_ingestion import JobSkillRequirement
+
+    if not job_ids:
+        return {}
+    rows = db.execute(
+        select(JobSkillRequirement).where(JobSkillRequirement.job_id.in_(job_ids))
+    ).scalars().all()
+    out: dict[UUID, list[JobSkillOut]] = {}
+    # De-duplicate by normalized name so a skill that exists as both a scraped
+    # and a recruiter-entered row only shows once on the card.
+    seen: dict[UUID, set[str]] = {}
+    for r in rows:
+        key = (r.skill_name_normalized or r.skill_name_raw or "").strip().lower()
+        bucket = seen.setdefault(r.job_id, set())
+        if key in bucket:
+            continue
+        bucket.add(key)
+        out.setdefault(r.job_id, []).append(
+            JobSkillOut(name=r.skill_name_raw, required=bool(r.is_required))
+        )
+    return out
 
 
 class JobImportRunBody(BaseModel):
@@ -161,6 +280,8 @@ class JobUpdateRequest(BaseModel):
     visibility: str | None = None
     external_apply_url: str | None = None
     hiring_pipeline: list[PipelineStageIn] | None = None
+    # When provided, replaces the recruiter-entered required skills.
+    skills: list[str] | None = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -171,7 +292,31 @@ def _count_applicants(db: Session, job_id: UUID) -> int:
     ).scalar_one()
 
 
-def _job_out(job: Job, applicant_count: int = 0) -> JobOut:
+def _stage_breakdown(stage_counts: dict[str, int]) -> list[PipelineCountOut]:
+    """Pipeline-ordered per-stage counts, skipping empty stages. Unknown stage
+    codes are appended at the end so nothing silently disappears."""
+    out = [
+        PipelineCountOut(stage=code, label=label, count=stage_counts[code])
+        for code, label in _STAGE_LABELS
+        if stage_counts.get(code)
+    ]
+    known = {code for code, _ in _STAGE_LABELS}
+    for code, n in stage_counts.items():
+        if code not in known and n:
+            out.append(
+                PipelineCountOut(
+                    stage=code, label=code.replace("_", " ").title(), count=n,
+                )
+            )
+    return out
+
+
+def _job_out(
+    job: Job,
+    applicant_count: int = 0,
+    pipeline_breakdown: list[PipelineCountOut] | None = None,
+    skills: list[JobSkillOut] | None = None,
+) -> JobOut:
     desc = job.description_text
     if desc and len(desc) > 16000:
         desc = desc[:16000] + "…"
@@ -216,13 +361,19 @@ def _job_out(job: Job, applicant_count: int = 0) -> JobOut:
             )
             for s in pipeline_for_job(job)
         ],
+        pipeline_breakdown=pipeline_breakdown or [],
+        skills=skills or [],
         created_at=job.created_at if hasattr(job, "created_at") else None,
         updated_at=job.updated_at if hasattr(job, "updated_at") else None,
     )
 
 
-def _job_detail_out(job: Job, applicant_count: int = 0) -> JobDetailOut:
-    return JobDetailOut(**_job_out(job, applicant_count).model_dump())
+def _job_detail_out(
+    job: Job,
+    applicant_count: int = 0,
+    skills: list[JobSkillOut] | None = None,
+) -> JobDetailOut:
+    return JobDetailOut(**_job_out(job, applicant_count, skills=skills).model_dump())
 
 
 def _is_publicly_listable(job: Job) -> bool:
@@ -358,11 +509,35 @@ def list_jobs(
     q = q.order_by(desc(Job.created_at)).limit(limit).offset(offset)
     jobs = db.execute(q).scalars().all()
 
-    # Batch applicant counts
+    # One grouped query → per-job applicant totals AND per-stage breakdowns
+    # (feeds the mini pipeline bar chart on each job card).
+    stage_rows: list[tuple[UUID, str | None, int]] = []
+    if jobs:
+        stage_rows = db.execute(
+            select(
+                Application.job_id,
+                Application.current_stage_code,
+                func.count(),
+            )
+            .where(Application.job_id.in_([j.id for j in jobs]))
+            .group_by(Application.job_id, Application.current_stage_code)
+        ).all()
+    counts_by_job: dict[UUID, dict[str, int]] = {}
+    for job_id, stage_code, n in stage_rows:
+        counts_by_job.setdefault(job_id, {})[(stage_code or "applied")] = int(n)
+
+    skills_by_job = _skills_for_jobs(db, [j.id for j in jobs])
     results = []
     for job in jobs:
-        count = _count_applicants(db, job.id)
-        results.append(_job_out(job, count))
+        stage_counts = counts_by_job.get(job.id, {})
+        results.append(
+            _job_out(
+                job,
+                sum(stage_counts.values()),
+                pipeline_breakdown=_stage_breakdown(stage_counts),
+                skills=skills_by_job.get(job.id, []),
+            )
+        )
     return results
 
 
@@ -414,7 +589,9 @@ def get_job(
     if job.organization_id != ctx.organization_id:
         raise HTTPException(status_code=404, detail="Job not found")
     count = _count_applicants(db, job_id)
-    return _job_detail_out(job, count)
+    return _job_detail_out(
+        job, count, skills=_skills_for_jobs(db, [job.id]).get(job.id, []),
+    )
 
 
 @router.post("", response_model=JobDetailOut, status_code=status.HTTP_201_CREATED)
@@ -428,12 +605,13 @@ def create_job(
     pipeline_stages = normalize_pipeline(
         [s.model_dump() for s in body.hiring_pipeline] if body.hiring_pipeline else None
     )
+    skills = _clean_skill_list(body.skills)
     job = Job(
         organization_id=ctx.organization_id,
         title=body.title,
         summary=body.summary,
         description_text=body.description_text,
-        requirements=body.requirements,
+        requirements=_apply_skills_to_requirements(body.requirements, skills),
         employment_type=body.employment_type or "full_time",
         seniority_level=body.seniority_level,
         workplace_type=body.workplace_type,
@@ -458,9 +636,14 @@ def create_job(
         ),
     )
     db.add(job)
+    db.flush()
+    if skills:
+        _replace_job_skill_rows(db, job.id, skills)
     db.commit()
     db.refresh(job)
-    return _job_detail_out(job, 0)
+    return _job_detail_out(
+        job, 0, skills=[JobSkillOut(name=s) for s in skills],
+    )
 
 
 @router.patch("/{job_id}", response_model=JobDetailOut)
@@ -488,13 +671,23 @@ def update_job(
         job.hiring_pipeline_jsonb = (
             {"version": 1, "stages": stages} if stages else None
         )
+    # Skills replace the recruiter-entered rows + refresh the marker line in
+    # the requirements text (which match scoring scans).
+    new_skills: list[str] | None = None
+    if "skills" in data:
+        new_skills = _clean_skill_list(data.pop("skills"))
     for field, value in data.items():
         setattr(job, field, value)
+    if new_skills is not None:
+        _replace_job_skill_rows(db, job.id, new_skills)
+        job.requirements = _apply_skills_to_requirements(job.requirements, new_skills)
 
     db.commit()
     db.refresh(job)
     count = _count_applicants(db, job_id)
-    return _job_detail_out(job, count)
+    return _job_detail_out(
+        job, count, skills=_skills_for_jobs(db, [job.id]).get(job.id, []),
+    )
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

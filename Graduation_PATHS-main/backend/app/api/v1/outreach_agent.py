@@ -108,6 +108,100 @@ def generate_email(
     return GeneratedEmailSchema(**email.to_dict())
 
 
+# ── Complete-profile outreach ───────────────────────────────────────────
+# Invites a sourced candidate to create their own account on PATHS and
+# complete their profile. Unlike interview outreach there is NO booking link,
+# NO HR availability, and no Google dependency — just a reviewed email.
+
+
+class ProfileCompletionGenerateRequest(BaseModel):
+    candidate_id: UUID
+
+
+class ProfileCompletionEmailOut(BaseModel):
+    subject: str
+    body: str
+    signup_url: str
+
+
+class ProfileCompletionSendRequest(BaseModel):
+    candidate_id: UUID
+    subject: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+    recipient_email: str | None = None
+
+
+@router.post("/profile-completion/generate", response_model=ProfileCompletionEmailOut)
+def generate_profile_completion_email(
+    body: ProfileCompletionGenerateRequest,
+    ctx: OrgContext = Depends(get_current_hiring_org_context),
+    db: Session = Depends(get_db),
+):
+    """Draft the "create your account / complete your profile" email."""
+    cand = _ensure_candidate_visible(
+        db, candidate_id=body.candidate_id, organization_id=ctx.organization_id,
+    )
+    from app.db.models.organization import Organization
+
+    org = db.get(Organization, ctx.organization_id)
+    org_name = org.name if org else "our organization"
+    hr_name = ctx.user.full_name or ctx.user.email
+    base = settings.outreach_public_base_url.rstrip("/")
+    signup_url = f"{base}/candidate-signup"
+    first_name = (cand.full_name or "there").split(" ")[0]
+    title_line = f" as {cand.current_title}" if cand.current_title else ""
+
+    subject = f"{org_name} would like to know more about you — complete your profile on PATHS"
+    email_body = (
+        f"Hello {first_name},\n\n"
+        f"My name is {hr_name} and I'm reaching out on behalf of {org_name}. "
+        f"We came across your professional profile{title_line} and would love "
+        f"to learn more about you.\n\n"
+        f"To move forward, we invite you to create your own account on PATHS — "
+        f"our hiring platform — and complete your profile (skills, experience, "
+        f"CV). A complete profile lets our team match you accurately to the "
+        f"right opportunities at {org_name}.\n\n"
+        f"Create your account here: {signup_url}\n\n"
+        f"It only takes a few minutes, and you stay in full control of your "
+        f"information.\n\n"
+        f"Best regards,\n"
+        f"{hr_name}\n"
+        f"{org_name} — via PATHS"
+    )
+    return ProfileCompletionEmailOut(subject=subject, body=email_body, signup_url=signup_url)
+
+
+@router.post("/profile-completion/send")
+def send_profile_completion_email(
+    body: ProfileCompletionSendRequest,
+    ctx: OrgContext = Depends(get_current_hiring_org_context),
+    db: Session = Depends(get_db),
+):
+    """Send the reviewed complete-profile email (plain email — no booking
+    link or calendar). Uses SMTP with the dev-logger fallback."""
+    cand = _ensure_candidate_visible(
+        db, candidate_id=body.candidate_id, organization_id=ctx.organization_id,
+    )
+    to = (body.recipient_email or cand.email or "").strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="candidate_has_no_email")
+
+    from app.services.email_service import send_email
+
+    result = send_email(to=to, subject=body.subject.strip(), body=body.body)
+    ok = bool(result.get("ok"))
+    if not ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Email send failed: {result.get('error', 'unknown')}",
+        )
+    logger.info(
+        "[outreach] profile-completion email sent to %s (provider=%s) by %s",
+        to, result.get("provider"), ctx.user.email,
+    )
+    return {"ok": True, "provider": result.get("provider"), "recipient": to}
+
+
 @router.post("/save-draft", response_model=CreateSessionResponse)
 def save_draft(
     body: CreateSessionRequest,
