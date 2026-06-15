@@ -76,7 +76,6 @@ flowchart TB
     BE --> PG[("PostgreSQL 16<br/>+ Apache AGE graph")]
     BE --> QD[("Qdrant<br/>vector store")]
     BE --> OL["Ollama<br/>embeddings / local LLM"]
-    BE --> OR["OpenRouter<br/>LLM inference"]
 ```
 
 | Layer | Technology |
