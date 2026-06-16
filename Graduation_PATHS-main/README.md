@@ -240,4 +240,7 @@ cd frontend && pnpm --filter @paths/web exec tsc --noEmit
 
 ## License
 
-Released under the [MIT License](LICENSE).
+This project is proprietary and all rights are reserved.
+
+You are not allowed to copy, use, modify, distribute, or reuse any part of this
+repository without written permission from the owner.
