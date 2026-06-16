@@ -238,24 +238,6 @@ cd backend && pytest
 cd frontend && pnpm --filter @paths/web exec tsc --noEmit
 ```
 
----
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [Architecture blueprint](docs/PATHS_Deep_Architecture_Blueprint.md) | Deep architecture and design rationale. |
-| [Recommendation system](docs/RECOMMENDATION_SYSTEM.md) | Content-based matching, scoring & ranking. |
-| [PATHy assistant](docs/PATHy.md) | The in-app context-aware support chatbot. |
-| [Project walkthrough](docs/PATHS_PROJECT_WALKTHROUGH.md) | End-to-end product tour. |
-| [Database design](docs/DDBB.md) | Schema, graph model, and entities. |
-| [Find-talent workflow](docs/FIND_TALENT_WORKFLOW.md) | Sourcing pipeline. |
-| [Implementation checklist](docs/PATHS_Implementation_Checklist.md) | Feature-by-feature status. |
-| [Production checklist](docs/PRODUCTION_CHECKLIST.md) | Go-live readiness. |
-| [Contributing](CONTRIBUTING.md) | Development workflow and conventions. |
-
----
-
 ## License
 
 Released under the [MIT License](LICENSE).
