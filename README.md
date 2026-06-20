@@ -1,6 +1,6 @@
 <div align="center">
 
-# PATHS — Personalised AI Talent Hiring System
+# PATHS - Personalised AI Talent Hiring System
 
 <img src="frontend/apps/web/public/paths-logo.png" alt="PATHS logo" width="150" />
 
