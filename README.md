@@ -2,7 +2,7 @@
 
 # PATHS - Personalised AI Talent Hiring System
 
-<img src="frontend/apps/web/public/paths-logo.png" alt="PATHS logo" width="150" />
+<img src="./paths-logo.png" alt="PATHS logo" width="150" />
 
 **Evidence-driven, human-in-the-loop recruitment powered by agentic AI.**
 
