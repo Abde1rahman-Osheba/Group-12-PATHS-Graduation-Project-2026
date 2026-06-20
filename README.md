@@ -426,7 +426,7 @@ What the uploaded repository contains, mapped to the submission requirements:
 | Osama Khalil       | 222100211 | Artificial Intelligence Science Program     |
 | Youssef Abousrewa  | 221101030 | Artificial Intelligence Engineering Program |
 
-## Supervision Team
+## Supervised By
 
 | Title               | Name              |
 | ------------------- | ----------------- |
