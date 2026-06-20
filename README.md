@@ -206,11 +206,10 @@ paths/
 │       ├── package.json        Frontend dependencies
 │       └── .env.local.example  → copy to apps/web/.env.local
 │
-├── e2e/                        Playwright end-to-end tests (all roles)
-│   └── tests/                  auth.setup · public · api · admin · candidate · org
-│
-├── scripts/                    Smoke test (scripts/smoke.js)
-└── docs/                       Architecture, evaluation, testing, prompt catalogue
+|__ e2e/                        Playwright end-to-end tests (all roles)
+    └── tests/                  auth.setup · public · api · admin · candidate · org
+
+
 ```
 
 ---
