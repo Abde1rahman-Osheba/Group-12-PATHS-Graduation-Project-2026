@@ -4,6 +4,8 @@
 
 <img src="./paths-logo.png" alt="PATHS logo" width="150" />
 
+**Explore the live PATHS platform:** [https://pathstalent.com/](https://pathstalent.com/)
+
 **Evidence-driven, human-in-the-loop recruitment powered by agentic AI.**
 
 [![Status](https://img.shields.io/badge/status-demo--ready-success)](#demonstration)
